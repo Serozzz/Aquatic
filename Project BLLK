@@ -10,7 +10,7 @@ local Window = Rayfield:CreateWindow({
    ShowText = "Flowers", -- Label on the mobile toggle button that opens/closes the UI
    Theme = "Ocean", -- Check https://docs.sirius.menu/rayfield/configuration/themes
 
-   ToggleUIKeybind = Enum.KeyCode.RightAlt, -- Internal keybind Rayfield listens for. Kept fixed; our own button/keybind simulate this key press
+   ToggleUIKeybind = Enum.KeyCode.F24, -- Internal-only keybind Rayfield listens for. F24 is obscure and never sent by real keyboards, so it can only ever be triggered by our own simulated press below
 
    DisableRayfieldPrompts = false,
    DisableBuildWarnings = false, -- Prevents Rayfield from warning when the script has a version mismatch with the interface
@@ -41,7 +41,7 @@ local Window = Rayfield:CreateWindow({
 
 local Tab = Window:CreateTab("Main", 4483362458) -- Title, Image
 
-local Section = Tab:CreateSection("Automatic")
+local Section = Tab:CreateSection("Defense")
 
 getgenv().AutoNiceShotEnabled = false
 getgenv().AutoNiceShotDistance = 60
@@ -169,9 +169,9 @@ local RayfieldIsOpen = true -- Rayfield opens by default after the loading scree
 
 -- Simulates the internal keybind Rayfield actually listens for
 local function SimulateInternalToggle()
-   VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.RightAlt, false, game)
+   VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F24, false, game)
    task.wait()
-   VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.RightAlt, false, game)
+   VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F24, false, game)
 end
 
 -- ScreenGui + button setup
@@ -186,7 +186,7 @@ ToggleButton.Size = UDim2.new(0, 60, 0, 60)
 ToggleButton.Position = getgenv().RayfieldButtonPosition
 ToggleButton.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 ToggleButton.BackgroundTransparency = 0.1
-ToggleButton.Image = "rbxassetid://0" -- Replace 0 with your own image id
+ToggleButton.Image = "rbxassetid://129661216416236" -- Replace 0 with your own image id
 ToggleButton.ScaleType = Enum.ScaleType.Fit
 ToggleButton.Parent = ToggleGui
 
@@ -305,6 +305,15 @@ local KeybindInput = SettingsTab:CreateInput({
       end)
 
       if Success and KeyCodeOrError then
+         if KeyCodeOrError == Enum.KeyCode.F24 then
+            Rayfield:Notify({
+               Title = "Reserved Keybind",
+               Content = "F24 is reserved internally and can't be used here. Please pick a different key.",
+               Duration = 5,
+            })
+            return
+         end
+
          getgenv().UIOpenKeybind = KeyCodeOrError
          Rayfield:Notify({
             Title = "Keybind Updated",
