@@ -284,7 +284,7 @@ ToggleButton.Size = UDim2.new(0, 60, 0, 60)
 ToggleButton.Position = getgenv().RayfieldButtonPosition
 ToggleButton.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 ToggleButton.BackgroundTransparency = 0.1
-ToggleButton.Image = "rbxassetid://129661216416236" -- Replace 0 with your own image id
+ToggleButton.Image = "rbxassetid://78925200059898" -- Replace 0 with your own image id
 ToggleButton.ScaleType = Enum.ScaleType.Fit
 ToggleButton.Parent = ToggleGui
 
