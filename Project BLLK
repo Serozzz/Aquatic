@@ -164,23 +164,49 @@ getgenv().DraggableButtonEnabled = true
 getgenv().UIOpenKeybind = Enum.KeyCode.RightAlt -- Your custom/rebindable key
 getgenv().RayfieldButtonPosition = UDim2.new(0.5, -30, 0.3, 0) -- Default/last saved position
 
--- Sanity check: warn loudly instead of silently doing nothing if this Rayfield
--- build doesn't expose the documented visibility API, so it's obvious what's wrong
-if type(Window.ToggleHide) ~= "function" then
-   warn("[RayfieldUI] Window:ToggleHide() isn't available on this Rayfield build - the toggle button won't work. Check docs.sirius.menu for the current API.")
+-- Confirmed via the debug dump: visibility lives on Rayfield itself, not Window.
+-- Rayfield:IsVisible() is the single source of truth - no separate boolean needed.
+local function ToggleRayfieldUI()
+   local Success, ErrorMessage = pcall(function()
+      Rayfield:SetVisibility(not Rayfield:IsVisible())
+   end)
+
+   if Success then
+      ToggleButton.Visible = (not Rayfield:IsVisible()) and getgenv().DraggableButtonEnabled
+   else
+      Rayfield:Notify({
+         Title = "Toggle Failed",
+         Content = tostring(ErrorMessage),
+         Duration = 8,
+      })
+   end
 end
 
-local IsHidden = false -- Window starts shown after the loading screen
-
--- Uses Rayfield's own official, documented method instead of poking at internal
--- instances, so this keeps working even if Rayfield's internals change again.
+-- Uses Rayfield's own official, documented methods instead of poking at internal
+-- instances. Tries ToggleHide first, falls back to Show/Hide, and reports any
+-- error in-game instead of silently doing nothing.
 local function ToggleRayfieldUI()
-   local Success = pcall(function()
-      Window:ToggleHide()
+   local Success, ErrorMessage = pcall(function()
+      if type(Window.ToggleHide) == "function" then
+         Window:ToggleHide()
+      elseif IsHidden and type(Window.Show) == "function" then
+         Window:Show()
+      elseif (not IsHidden) and type(Window.Hide) == "function" then
+         Window:Hide()
+      else
+         error("No ToggleHide/Show/Hide method found on Window")
+      end
    end)
+
    if Success then
       IsHidden = not IsHidden
       ToggleButton.Visible = IsHidden and getgenv().DraggableButtonEnabled
+   else
+      Rayfield:Notify({
+         Title = "Toggle Failed",
+         Content = tostring(ErrorMessage),
+         Duration = 8,
+      })
    end
 end
 
@@ -283,8 +309,9 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
    end
 end)
 
--- Button starts hidden since Rayfield is open by default on load
-ToggleButton.Visible = false
+-- Match the button's initial visibility to reality instead of assuming
+local InitSuccess, InitVisible = pcall(function() return Rayfield:IsVisible() end)
+ToggleButton.Visible = InitSuccess and (not InitVisible)
 
 --============================================================
 -- Settings tab elements
@@ -296,7 +323,8 @@ local DraggableButtonToggle = SettingsTab:CreateToggle({
    Flag = "DraggableButtonEnabled",
    Callback = function(Value)
       getgenv().DraggableButtonEnabled = Value
-      ToggleButton.Visible = Value and IsHidden
+      local Success, Visible = pcall(function() return Rayfield:IsVisible() end)
+      ToggleButton.Visible = Value and Success and (not Visible)
    end,
 })
 
