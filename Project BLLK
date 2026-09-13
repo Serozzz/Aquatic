@@ -161,21 +161,27 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 getgenv().DraggableButtonEnabled = true
-getgenv().UIOpenKeybind = Enum.KeyCode.K -- Your custom/rebindable key
+getgenv().UIOpenKeybind = Enum.KeyCode.RightAlt -- Your custom/rebindable key
 getgenv().RayfieldButtonPosition = UDim2.new(0.5, -30, 0.3, 0) -- Default/last saved position
 
--- Sanity check: warn loudly (instead of silently doing nothing) if this Rayfield
--- version doesn't expose Main the way we expect, so it's obvious what to fix
-if not (Rayfield.Main and Rayfield.Main:IsA("GuiObject")) then
-   warn("[RayfieldUI] Rayfield.Main isn't a GuiObject on this build - the toggle button won't work. Check for an updated Rayfield source or print(Rayfield) to find the right property.")
+-- Sanity check: warn loudly instead of silently doing nothing if this Rayfield
+-- build doesn't expose the documented visibility API, so it's obvious what's wrong
+if type(Window.ToggleHide) ~= "function" then
+   warn("[RayfieldUI] Window:ToggleHide() isn't available on this Rayfield build - the toggle button won't work. Check docs.sirius.menu for the current API.")
 end
 
--- Directly flips Rayfield's real window visibility and keeps our button in sync with it.
--- No simulated input, no internal keybind faking, no separate boolean that can drift
--- out of sync with reality - Rayfield.Main.Visible IS the single source of truth.
+local IsHidden = false -- Window starts shown after the loading screen
+
+-- Uses Rayfield's own official, documented method instead of poking at internal
+-- instances, so this keeps working even if Rayfield's internals change again.
 local function ToggleRayfieldUI()
-   Rayfield.Main.Visible = not Rayfield.Main.Visible
-   ToggleButton.Visible = (not Rayfield.Main.Visible) and getgenv().DraggableButtonEnabled
+   local Success = pcall(function()
+      Window:ToggleHide()
+   end)
+   if Success then
+      IsHidden = not IsHidden
+      ToggleButton.Visible = IsHidden and getgenv().DraggableButtonEnabled
+   end
 end
 
 -- ScreenGui + button setup
@@ -290,7 +296,7 @@ local DraggableButtonToggle = SettingsTab:CreateToggle({
    Flag = "DraggableButtonEnabled",
    Callback = function(Value)
       getgenv().DraggableButtonEnabled = Value
-      ToggleButton.Visible = Value and (not Rayfield.Main.Visible)
+      ToggleButton.Visible = Value and IsHidden
    end,
 })
 
