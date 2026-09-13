@@ -7,7 +7,10 @@ local Window = Rayfield:CreateWindow({
    Icon = 0, -- Icon in Topbar. Can use Lucide Icons (string) or Roblox Image (number). 0 to use no icon (default).
    LoadingTitle = "Rayfield Interface Suite",
    LoadingSubtitle = "by Sirius",
+   ShowText = "Flowers", -- Label on the mobile toggle button that opens/closes the UI
    Theme = "Ocean", -- Check https://docs.sirius.menu/rayfield/configuration/themes
+
+   ToggleUIKeybind = Enum.KeyCode.RightAlt, -- Internal keybind Rayfield listens for. Kept fixed; our own button/keybind simulate this key press
 
    DisableRayfieldPrompts = false,
    DisableBuildWarnings = false, -- Prevents Rayfield from warning when the script has a version mismatch with the interface
@@ -46,13 +49,27 @@ local AutoNiceShotLoaded = false
 
 local DistanceSlider = Tab:CreateSlider({
    Name = "Trigger Distance",
-   Range = {10, 60}, -- min, max
-   Increment = 5,
+   Range = {0, 60}, -- min, max
+   Increment = 1,
    Suffix = "studs",
    CurrentValue = 60,
    Flag = "AutoNiceShotDistance",
    Callback = function(Value)
       getgenv().AutoNiceShotDistance = Value
+   end,
+})
+
+local DistanceInput = Tab:CreateInput({
+   Name = "Set Exact Distance",
+   PlaceholderText = "Type a number (0-60)",
+   RemoveTextAfterFocusLost = true,
+   Callback = function(Text)
+      local Number = tonumber(Text)
+      if Number then
+         Number = math.clamp(Number, 0, 60)
+         getgenv().AutoNiceShotDistance = Number
+         DistanceSlider:Set(Number) -- keeps the slider visually in sync
+      end
    end,
 })
 
@@ -66,6 +83,240 @@ local Toggle = Tab:CreateToggle({
       if not AutoNiceShotLoaded then
          AutoNiceShotLoaded = true
          loadstring(game:HttpGet("https://raw.githubusercontent.com/Serozzz/Aquatic/refs/heads/main/Auto%20nice%20shot"))()
+      end
+   end,
+})
+
+-- ================= AUTO DRIBBLE =================
+
+local DribbleSection = Tab:CreateSection("Dribble")
+
+getgenv().AutoDribbleEnabled = false
+getgenv().AutoDribbleDistance = 22
+getgenv().AutoDribbleRequireLooking = true
+local AutoDribbleLoaded = false
+
+local DribbleDistanceSlider = Tab:CreateSlider({
+   Name = "Dribble Detection Distance",
+   Range = {0, 60}, -- min, max
+   Increment = 1,
+   Suffix = "studs",
+   CurrentValue = 22,
+   Flag = "AutoDribbleDistance",
+   Callback = function(Value)
+      getgenv().AutoDribbleDistance = Value
+   end,
+})
+
+local DribbleDistanceInput = Tab:CreateInput({
+   Name = "Set Exact Dribble Distance",
+   PlaceholderText = "Type a number (0-60)",
+   RemoveTextAfterFocusLost = true,
+   Callback = function(Text)
+      local Number = tonumber(Text)
+      if Number then
+         Number = math.clamp(Number, 0, 60)
+         getgenv().AutoDribbleDistance = Number
+         DribbleDistanceSlider:Set(Number) -- keeps the slider visually in sync
+      end
+   end,
+})
+
+local RequireLookingToggle = Tab:CreateToggle({
+   Name = "Only Trigger If They're Looking At You",
+   CurrentValue = true,
+   Flag = "AutoDribbleRequireLooking",
+   Callback = function(Value)
+      getgenv().AutoDribbleRequireLooking = Value
+   end,
+})
+
+local DribbleToggle = Tab:CreateToggle({
+   Name = "Auto Dribble",
+   CurrentValue = false,
+   Flag = "AutoDribble", -- A flag is the identifier for the configuration file, make sure every element has a different flag if you're using configuration saving to ensure no overlaps
+   Callback = function(Value)
+      getgenv().AutoDribbleEnabled = Value
+
+      if not AutoDribbleLoaded then
+         AutoDribbleLoaded = true
+         loadstring(game:HttpGet("https://raw.githubusercontent.com/Serozzz/Aquatic/refs/heads/main/Auto%20Dribble"))()
+      end
+   end,
+})
+
+-- ================= SETTINGS TAB =================
+
+local SettingsTab = Window:CreateTab("Settings", 4483362458) -- Title, Image
+
+local SettingsSection = SettingsTab:CreateSection("UI Options")
+
+--============================================================
+-- Custom draggable toggle button (opens/closes the Rayfield UI)
+--============================================================
+
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+getgenv().DraggableButtonEnabled = true
+getgenv().UIOpenKeybind = Enum.KeyCode.RightAlt -- The key that triggers the internal RightAlt press below
+getgenv().RayfieldButtonPosition = UDim2.new(0.5, -30, 0.3, 0) -- Default/last saved position
+
+local RayfieldIsOpen = true -- Rayfield opens by default after the loading screen
+
+-- Simulates the internal keybind Rayfield actually listens for
+local function SimulateInternalToggle()
+   VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.RightAlt, false, game)
+   task.wait()
+   VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.RightAlt, false, game)
+end
+
+-- ScreenGui + button setup
+local ToggleGui = Instance.new("ScreenGui")
+ToggleGui.Name = "RayfieldToggleButton"
+ToggleGui.ResetOnSpawn = false
+ToggleGui.Parent = playerGui
+
+local ToggleButton = Instance.new("ImageButton")
+ToggleButton.Name = "DragButton"
+ToggleButton.Size = UDim2.new(0, 60, 0, 60)
+ToggleButton.Position = getgenv().RayfieldButtonPosition
+ToggleButton.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+ToggleButton.BackgroundTransparency = 0.1
+ToggleButton.Image = "rbxassetid://0" -- Replace 0 with your own image id
+ToggleButton.ScaleType = Enum.ScaleType.Fit
+ToggleButton.Parent = ToggleGui
+
+local ButtonCorner = Instance.new("UICorner")
+ButtonCorner.CornerRadius = UDim.new(0, 14)
+ButtonCorner.Parent = ToggleButton
+
+local ButtonStroke = Instance.new("UIStroke")
+ButtonStroke.Thickness = 3
+ButtonStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+ButtonStroke.Parent = ToggleButton
+
+local StrokeGradient = Instance.new("UIGradient")
+StrokeGradient.Color = ColorSequence.new({
+   ColorSequenceKeypoint.new(0, Color3.fromRGB(92, 217, 255)),
+   ColorSequenceKeypoint.new(1, Color3.fromRGB(92, 119, 255)),
+})
+StrokeGradient.Parent = ButtonStroke
+
+-- Animate the gradient rotation continuously so the outline looks "alive"
+task.spawn(function()
+   while task.wait(0.03) do
+      if not ToggleGui or not ToggleGui.Parent then break end
+      StrokeGradient.Rotation = (StrokeGradient.Rotation + 2) % 360
+   end
+end)
+
+-- Dragging logic (works with mouse and touch)
+local dragging = false
+local dragInput
+local dragStart
+local startPos
+local dragDistance = 0
+
+local function updateDrag(input)
+   local delta = input.Position - dragStart
+   dragDistance = delta.Magnitude
+   ToggleButton.Position = UDim2.new(
+      startPos.X.Scale, startPos.X.Offset + delta.X,
+      startPos.Y.Scale, startPos.Y.Offset + delta.Y
+   )
+end
+
+ToggleButton.InputBegan:Connect(function(input)
+   if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+      dragging = true
+      dragDistance = 0
+      dragStart = input.Position
+      startPos = ToggleButton.Position
+
+      input.Changed:Connect(function()
+         if input.UserInputState == Enum.UserInputState.End then
+            dragging = false
+            getgenv().RayfieldButtonPosition = ToggleButton.Position -- save position for next time it appears
+         end
+      end)
+   end
+end)
+
+ToggleButton.InputChanged:Connect(function(input)
+   if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+      dragInput = input
+   end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+   if input == dragInput and dragging then
+      updateDrag(input)
+   end
+end)
+
+-- Clicking (not dragging) the button toggles the Rayfield UI
+ToggleButton.MouseButton1Click:Connect(function()
+   if dragDistance > 5 then return end -- ignore click if it was actually a drag
+
+   SimulateInternalToggle()
+   RayfieldIsOpen = not RayfieldIsOpen
+   ToggleButton.Visible = not RayfieldIsOpen and getgenv().DraggableButtonEnabled
+end)
+
+-- Custom keybind that also opens/closes the UI (changeable from Settings tab)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+   if gameProcessed then return end
+   if input.KeyCode == getgenv().UIOpenKeybind then
+      SimulateInternalToggle()
+      RayfieldIsOpen = not RayfieldIsOpen
+      ToggleButton.Visible = not RayfieldIsOpen and getgenv().DraggableButtonEnabled
+   end
+end)
+
+-- Button starts hidden since Rayfield is open by default on load
+ToggleButton.Visible = false
+
+--============================================================
+-- Settings tab elements
+--============================================================
+
+local DraggableButtonToggle = SettingsTab:CreateToggle({
+   Name = "Enable Draggable Button",
+   CurrentValue = true,
+   Flag = "DraggableButtonEnabled",
+   Callback = function(Value)
+      getgenv().DraggableButtonEnabled = Value
+      ToggleButton.Visible = Value and (not RayfieldIsOpen)
+   end,
+})
+
+local KeybindInput = SettingsTab:CreateInput({
+   Name = "Change UI Open Keybind",
+   PlaceholderText = "Type a key (e.g. RightAlt, K, F4)",
+   RemoveTextAfterFocusLost = true,
+   Callback = function(Text)
+      local KeyName = Text:gsub("%s+", "") -- strip spaces
+      local Success, KeyCodeOrError = pcall(function()
+         return Enum.KeyCode[KeyName]
+      end)
+
+      if Success and KeyCodeOrError then
+         getgenv().UIOpenKeybind = KeyCodeOrError
+         Rayfield:Notify({
+            Title = "Keybind Updated",
+            Content = "UI open keybind successfully changed to " .. KeyName,
+            Duration = 4,
+         })
+      else
+         Rayfield:Notify({
+            Title = "Invalid Keybind",
+            Content = "'" .. Text .. "' is not a recognized key. Try something like RightAlt, K, or F4.",
+            Duration = 5,
+         })
       end
    end,
 })
