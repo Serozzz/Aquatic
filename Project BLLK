@@ -10,7 +10,7 @@ local Window = Rayfield:CreateWindow({
    ShowText = "Flowers", -- Label on the mobile toggle button that opens/closes the UI
    Theme = "Ocean", -- Check https://docs.sirius.menu/rayfield/configuration/themes
 
-   ToggleUIKeybind = Enum.KeyCode.F24, -- Internal-only keybind Rayfield listens for. F24 is obscure and never sent by real keyboards, so it can only ever be triggered by our own simulated press below
+   ToggleUIKeybind = Enum.KeyCode.F15, -- Internal-only keybind Rayfield listens for. F15 is the highest valid function key and is virtually never on a real keyboard, so it's only ever triggered by our own simulated press below
 
    DisableRayfieldPrompts = false,
    DisableBuildWarnings = false, -- Prevents Rayfield from warning when the script has a version mismatch with the interface
@@ -162,16 +162,16 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 getgenv().DraggableButtonEnabled = true
-getgenv().UIOpenKeybind = Enum.KeyCode.RightAlt -- The key that triggers the internal RightAlt press below
+getgenv().UIOpenKeybind = Enum.KeyCode.RightAlt -- The key that triggers the internal F15 press below
 getgenv().RayfieldButtonPosition = UDim2.new(0.5, -30, 0.3, 0) -- Default/last saved position
 
 local RayfieldIsOpen = true -- Rayfield opens by default after the loading screen
 
 -- Simulates the internal keybind Rayfield actually listens for
 local function SimulateInternalToggle()
-   VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F24, false, game)
+   VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F15, false, game)
    task.wait()
-   VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F24, false, game)
+   VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F15, false, game)
 end
 
 -- ScreenGui + button setup
@@ -305,10 +305,10 @@ local KeybindInput = SettingsTab:CreateInput({
       end)
 
       if Success and KeyCodeOrError then
-         if KeyCodeOrError == Enum.KeyCode.F24 then
+         if KeyCodeOrError == Enum.KeyCode.F15 then
             Rayfield:Notify({
                Title = "Reserved Keybind",
-               Content = "F24 is reserved internally and can't be used here. Please pick a different key.",
+               Content = "F15 is reserved internally and can't be used here. Please pick a different key.",
                Duration = 5,
             })
             return
