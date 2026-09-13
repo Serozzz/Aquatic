@@ -10,7 +10,8 @@ local Window = Rayfield:CreateWindow({
    ShowText = "Flowers", -- Label on the mobile toggle button that opens/closes the UI
    Theme = "Ocean", -- Check https://docs.sirius.menu/rayfield/configuration/themes
 
-   ToggleUIKeybind = Enum.KeyCode.RightAlt, -- Rayfield's own native keybind, set to a key that's virtually never physically present so it can't accidentally desync with our own system below (we don't simulate it anymore, we bypass it entirely)
+   -- User confirmed F6 is fine as Rayfield's native hotkey.
+   ToggleUIKeybind = Enum.KeyCode.F6,
 
    DisableRayfieldPrompts = false,
    DisableBuildWarnings = false, -- Prevents Rayfield from warning when the script has a version mismatch with the interface
@@ -18,7 +19,7 @@ local Window = Rayfield:CreateWindow({
    ConfigurationSaving = {
       Enabled = false,
       FolderName = nil, -- Create a custom folder for your hub/game
-      FileName = "Big Hub"
+      FileName = "RayfieldUI"
    },
 
    Discord = {
@@ -40,6 +41,56 @@ local Window = Rayfield:CreateWindow({
 })
 
 local Tab = Window:CreateTab("Main", 4483362458) -- Title, Image
+
+local ConfigSection = Tab:CreateSection("Configuration")
+
+local SaveConfigButton = Tab:CreateButton({
+   Name = "Save Configuration",
+   Callback = function()
+      local Success, ErrorMessage = pcall(function()
+         Rayfield:SaveConfiguration()
+      end)
+
+      if Success then
+         Rayfield:Notify({
+            Title = "Configuration Saved",
+            Content = "Your current settings have been saved.",
+            Duration = 4,
+         })
+      else
+         warn("[SaveConfiguration] " .. tostring(ErrorMessage))
+         Rayfield:Notify({
+            Title = "Save Failed",
+            Content = tostring(ErrorMessage),
+            Duration = 8,
+         })
+      end
+   end,
+})
+
+local LoadConfigButton = Tab:CreateButton({
+   Name = "Load Configuration",
+   Callback = function()
+      local Success, ErrorMessage = pcall(function()
+         Rayfield:LoadConfiguration()
+      end)
+
+      if Success then
+         Rayfield:Notify({
+            Title = "Configuration Loaded",
+            Content = "Your saved settings have been applied.",
+            Duration = 4,
+         })
+      else
+         warn("[LoadConfiguration] " .. tostring(ErrorMessage))
+         Rayfield:Notify({
+            Title = "Load Failed",
+            Content = tostring(ErrorMessage),
+            Duration = 8,
+         })
+      end
+   end,
+})
 
 local Section = Tab:CreateSection("Defense")
 
@@ -164,50 +215,61 @@ getgenv().DraggableButtonEnabled = true
 getgenv().UIOpenKeybind = Enum.KeyCode.RightAlt -- Your custom/rebindable key
 getgenv().RayfieldButtonPosition = UDim2.new(0.5, -30, 0.3, 0) -- Default/last saved position
 
--- Confirmed via the debug dump: visibility lives on Rayfield itself, not Window.
--- Rayfield:IsVisible() is the single source of truth - no separate boolean needed.
-local function ToggleRayfieldUI()
-   local Success, ErrorMessage = pcall(function()
-      Rayfield:SetVisibility(not Rayfield:IsVisible())
-   end)
+-- REWORK: rather than betting on one method name (ToggleHide/Hide/Show) and
+-- keeping our own IsHidden boolean in sync with it by hand, we now:
+--   1) try a handful of known Rayfield toggle method names when the button
+--      is clicked/keybind pressed, remembering whichever one works so we
+--      don't re-guess every time
+--   2) separately, run a small loop that polls the REAL Rayfield:IsVisible()
+--      state and syncs ToggleButton.Visible from that directly
+-- This means the button's visibility can never drift out of sync with
+-- reality, regardless of which internal method name your Rayfield build
+-- actually exposes - it no longer depends on us guessing correctly.
+local KnownToggleMethods = {"ToggleHide", "Minimise", "Minimize"}
+local WorkingToggleMethod = nil
 
-   if Success then
-      ToggleButton.Visible = (not Rayfield:IsVisible()) and getgenv().DraggableButtonEnabled
+local function ToggleRayfieldUI()
+   local Success, ErrorMessage = false, "No working method found yet"
+
+   if WorkingToggleMethod then
+      Success, ErrorMessage = pcall(function()
+         Window[WorkingToggleMethod](Window)
+      end)
    else
-      Rayfield:Notify({
-         Title = "Toggle Failed",
-         Content = tostring(ErrorMessage),
-         Duration = 8,
-      })
-   end
-end
-
--- Uses Rayfield's own official, documented methods instead of poking at internal
--- instances. Tries ToggleHide first, falls back to Show/Hide, and reports any
--- error in-game instead of silently doing nothing.
-local function ToggleRayfieldUI()
-   local Success, ErrorMessage = pcall(function()
-      if type(Window.ToggleHide) == "function" then
-         Window:ToggleHide()
-      elseif IsHidden and type(Window.Show) == "function" then
-         Window:Show()
-      elseif (not IsHidden) and type(Window.Hide) == "function" then
-         Window:Hide()
-      else
-         error("No ToggleHide/Show/Hide method found on Window")
+      for _, MethodName in ipairs(KnownToggleMethods) do
+         if type(Window[MethodName]) == "function" then
+            Success, ErrorMessage = pcall(function()
+               Window[MethodName](Window)
+            end)
+            if Success then
+               WorkingToggleMethod = MethodName
+               break
+            end
+         end
       end
-   end)
+   end
 
-   if Success then
-      IsHidden = not IsHidden
-      ToggleButton.Visible = IsHidden and getgenv().DraggableButtonEnabled
-   else
+   -- Fallback: some Rayfield builds expose SetVisibility directly on the
+   -- Rayfield table itself rather than a per-Window method.
+   if not Success then
+      Success, ErrorMessage = pcall(function()
+         Rayfield:SetVisibility(not Rayfield:IsVisible())
+      end)
+      if Success then
+         WorkingToggleMethod = nil -- this path doesn't use Window methods
+      end
+   end
+
+   if not Success then
+      warn("[ToggleRayfieldUI] " .. tostring(ErrorMessage))
       Rayfield:Notify({
          Title = "Toggle Failed",
          Content = tostring(ErrorMessage),
          Duration = 8,
       })
    end
+   -- NOTE: ToggleButton.Visible is intentionally NOT set here anymore -
+   -- the polling loop below is now the single source of truth for it.
 end
 
 -- ScreenGui + button setup
@@ -247,6 +309,21 @@ task.spawn(function()
    while task.wait(0.03) do
       if not ToggleGui or not ToggleGui.Parent then break end
       StrokeGradient.Rotation = (StrokeGradient.Rotation + 2) % 360
+   end
+end)
+
+-- Single source of truth for the button's visibility: poll Rayfield's real
+-- IsVisible() state directly, rather than tracking our own boolean that can
+-- drift out of sync depending on which toggle method actually worked.
+task.spawn(function()
+   while task.wait(0.1) do
+      if not ToggleGui or not ToggleGui.Parent then break end
+      local Success, Visible = pcall(function() return Rayfield:IsVisible() end)
+      if Success then
+         ToggleButton.Visible = (not Visible) and getgenv().DraggableButtonEnabled
+      else
+         warn("[ButtonVisibilitySync] " .. tostring(Visible))
+      end
    end
 end)
 
@@ -309,9 +386,9 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
    end
 end)
 
--- Match the button's initial visibility to reality instead of assuming
-local InitSuccess, InitVisible = pcall(function() return Rayfield:IsVisible() end)
-ToggleButton.Visible = InitSuccess and (not InitVisible)
+-- Initial button visibility is now handled entirely by the polling loop
+-- above, which runs immediately and will set the correct state within
+-- 0.1s of the script loading - no separate one-time check needed here.
 
 --============================================================
 -- Settings tab elements
@@ -322,9 +399,10 @@ local DraggableButtonToggle = SettingsTab:CreateToggle({
    CurrentValue = true,
    Flag = "DraggableButtonEnabled",
    Callback = function(Value)
+      -- Just update the flag - the polling loop above picks this up and
+      -- syncs ToggleButton.Visible within 0.1s, so no need to duplicate
+      -- the Rayfield:IsVisible() pcall here too.
       getgenv().DraggableButtonEnabled = Value
-      local Success, Visible = pcall(function() return Rayfield:IsVisible() end)
-      ToggleButton.Visible = Value and Success and (not Visible)
    end,
 })
 
