@@ -10,7 +10,7 @@ local Window = Rayfield:CreateWindow({
    ShowText = "Flowers", -- Label on the mobile toggle button that opens/closes the UI
    Theme = "Ocean", -- Check https://docs.sirius.menu/rayfield/configuration/themes
 
-   ToggleUIKeybind = Enum.KeyCode.F15, -- Rayfield's own native keybind, set to a key that's virtually never physically present so it can't accidentally desync with our own system below (we don't simulate it anymore, we bypass it entirely)
+   ToggleUIKeybind = Enum.KeyCode.RightAlt, -- Rayfield's own native keybind, set to a key that's virtually never physically present so it can't accidentally desync with our own system below (we don't simulate it anymore, we bypass it entirely)
 
    DisableRayfieldPrompts = false,
    DisableBuildWarnings = false, -- Prevents Rayfield from warning when the script has a version mismatch with the interface
