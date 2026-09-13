@@ -1,0 +1,107 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local player = Players.LocalPlayer
+
+-- These get overwritten by the Rayfield UI (slider/textbox/toggles), these are just safe defaults
+-- in case this script is ever run standalone without the UI loaded first
+if getgenv().AutoDribbleEnabled == nil then getgenv().AutoDribbleEnabled = false end
+if getgenv().AutoDribbleDistance == nil then getgenv().AutoDribbleDistance = 22 end
+if getgenv().AutoDribbleRequireLooking == nil then getgenv().AutoDribbleRequireLooking = true end
+
+-- Known tackle/steal animations to watch for
+local WatchedAnimationIds = {
+    ["71941446302292"] = true,  -- Default universal slide tackle
+    ["101039216746541"] = true, -- "ILL BEAT YOU UP" - Shidou steal move
+}
+
+local canDribble = true
+
+local function getHRP(character)
+    if not character then return nil end
+    return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function getAnimator(character)
+    if not character then return nil end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return nil end
+    return humanoid:FindFirstChildOfClass("Animator")
+end
+
+-- Extracts the numeric id out of "rbxassetid://12345" -> "12345"
+local function extractAnimId(animationIdString)
+    return animationIdString:match("(%d+)$")
+end
+
+-- Checks if otherPlayer's HRP is facing roughly toward myHRP
+local function isLookingAtMe(otherHRP, myHRP)
+    local directionToMe = (myHRP.Position - otherHRP.Position).Unit
+    local lookVector = otherHRP.CFrame.LookVector
+    local dot = lookVector:Dot(directionToMe)
+    return dot > 0.5 -- roughly within a 60 degree cone facing you
+end
+
+local function pressDribble()
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+    task.wait()
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+end
+
+player.CharacterAdded:Connect(function()
+    canDribble = true
+end)
+
+RunService.RenderStepped:Connect(function()
+    if not getgenv().AutoDribbleEnabled then return end
+    if not canDribble then return end
+
+    local success, err = pcall(function()
+        local myCharacter = player.Character
+        local myHRP = getHRP(myCharacter)
+        if not myHRP then return end
+
+        local triggerDistance = math.clamp(getgenv().AutoDribbleDistance or 22, 0, 60)
+        local requireLooking = getgenv().AutoDribbleRequireLooking
+
+        for _, otherPlayer in ipairs(Players:GetPlayers()) do
+            if otherPlayer == player then continue end
+
+            -- Skip teammates (only applies if the game actually uses Teams)
+            if player.Team and otherPlayer.Team and player.Team == otherPlayer.Team then continue end
+
+            local otherCharacter = otherPlayer.Character
+            local otherHRP = getHRP(otherCharacter)
+            if not otherHRP then continue end
+
+            local distance = (myHRP.Position - otherHRP.Position).Magnitude
+            if distance > triggerDistance then continue end
+
+            local animator = getAnimator(otherCharacter)
+            if not animator then continue end
+
+            local playingTracks = animator:GetPlayingAnimationTracks()
+            for _, track in ipairs(playingTracks) do
+                local animId = extractAnimId(track.Animation.AnimationId)
+                if animId and WatchedAnimationIds[animId] then
+                    if (not requireLooking) or isLookingAtMe(otherHRP, myHRP) then
+                        canDribble = false
+                        pressDribble()
+
+                        task.delay(0.3, function()
+                            canDribble = true
+                        end)
+                    end
+                    break
+                end
+            end
+
+            if not canDribble then break end
+        end
+    end)
+
+    if not success then
+        warn("Auto Dribble error: " .. tostring(err))
+    end
+end)
