@@ -10,7 +10,7 @@ local Window = Rayfield:CreateWindow({
    ShowText = "Flowers", -- Label on the mobile toggle button that opens/closes the UI
    Theme = "Ocean", -- Check https://docs.sirius.menu/rayfield/configuration/themes
 
-   ToggleUIKeybind = Enum.KeyCode.RightAlt, -- The real, physical key Rayfield's own built-in toggle listens for. Using a common, well-supported key here (instead of an obscure F-key) avoids VirtualInputManager reliability issues on some executors.
+   ToggleUIKeybind = Enum.KeyCode.F15, -- Rayfield's own native keybind, set to a key that's virtually never physically present so it can't accidentally desync with our own system below (we don't simulate it anymore, we bypass it entirely)
 
    DisableRayfieldPrompts = false,
    DisableBuildWarnings = false, -- Prevents Rayfield from warning when the script has a version mismatch with the interface
@@ -155,23 +155,27 @@ local SettingsSection = SettingsTab:CreateSection("UI Options")
 -- Custom draggable toggle button (opens/closes the Rayfield UI)
 --============================================================
 
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 getgenv().DraggableButtonEnabled = true
-getgenv().UIOpenKeybind = Enum.KeyCode.K -- Your custom/rebindable key. Pressing this simulates a RightAlt press below, which is what Rayfield actually listens for.
+getgenv().UIOpenKeybind = Enum.KeyCode.K -- Your custom/rebindable key
 getgenv().RayfieldButtonPosition = UDim2.new(0.5, -30, 0.3, 0) -- Default/last saved position
 
-local RayfieldIsOpen = true -- Rayfield opens by default after the loading screen
+-- Sanity check: warn loudly (instead of silently doing nothing) if this Rayfield
+-- version doesn't expose Main the way we expect, so it's obvious what to fix
+if not (Rayfield.Main and Rayfield.Main:IsA("GuiObject")) then
+   warn("[RayfieldUI] Rayfield.Main isn't a GuiObject on this build - the toggle button won't work. Check for an updated Rayfield source or print(Rayfield) to find the right property.")
+end
 
--- Simulates a press of Rayfield's real ToggleUIKeybind (RightAlt), so any key you rebind still reaches it
-local function SimulateInternalToggle()
-   VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.RightAlt, false, game)
-   task.wait()
-   VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.RightAlt, false, game)
+-- Directly flips Rayfield's real window visibility and keeps our button in sync with it.
+-- No simulated input, no internal keybind faking, no separate boolean that can drift
+-- out of sync with reality - Rayfield.Main.Visible IS the single source of truth.
+local function ToggleRayfieldUI()
+   Rayfield.Main.Visible = not Rayfield.Main.Visible
+   ToggleButton.Visible = (not Rayfield.Main.Visible) and getgenv().DraggableButtonEnabled
 end
 
 -- ScreenGui + button setup
@@ -262,18 +266,14 @@ end)
 ToggleButton.MouseButton1Click:Connect(function()
    if dragDistance > 5 then return end -- ignore click if it was actually a drag
 
-   SimulateInternalToggle()
-   RayfieldIsOpen = not RayfieldIsOpen
-   ToggleButton.Visible = not RayfieldIsOpen and getgenv().DraggableButtonEnabled
+   ToggleRayfieldUI()
 end)
 
 -- Custom keybind that also opens/closes the UI (changeable from Settings tab)
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
    if gameProcessed then return end
    if input.KeyCode == getgenv().UIOpenKeybind then
-      SimulateInternalToggle()
-      RayfieldIsOpen = not RayfieldIsOpen
-      ToggleButton.Visible = not RayfieldIsOpen and getgenv().DraggableButtonEnabled
+      ToggleRayfieldUI()
    end
 end)
 
@@ -290,7 +290,7 @@ local DraggableButtonToggle = SettingsTab:CreateToggle({
    Flag = "DraggableButtonEnabled",
    Callback = function(Value)
       getgenv().DraggableButtonEnabled = Value
-      ToggleButton.Visible = Value and (not RayfieldIsOpen)
+      ToggleButton.Visible = Value and (not Rayfield.Main.Visible)
    end,
 })
 
@@ -305,15 +305,6 @@ local KeybindInput = SettingsTab:CreateInput({
       end)
 
       if Success and KeyCodeOrError then
-         if KeyCodeOrError == Enum.KeyCode.RightAlt then
-            Rayfield:Notify({
-               Title = "Reserved Keybind",
-               Content = "RightAlt is Rayfield's own built-in toggle key. Binding your key to it too would cause double-toggling. Please pick a different key.",
-               Duration = 6,
-            })
-            return
-         end
-
          getgenv().UIOpenKeybind = KeyCodeOrError
          Rayfield:Notify({
             Title = "Keybind Updated",
