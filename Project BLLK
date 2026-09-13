@@ -10,7 +10,7 @@ local Window = Rayfield:CreateWindow({
    ShowText = "Flowers", -- Label on the mobile toggle button that opens/closes the UI
    Theme = "Ocean", -- Check https://docs.sirius.menu/rayfield/configuration/themes
 
-   ToggleUIKeybind = Enum.KeyCode.F15, -- Internal-only keybind Rayfield listens for. F15 is the highest valid function key and is virtually never on a real keyboard, so it's only ever triggered by our own simulated press below
+   ToggleUIKeybind = Enum.KeyCode.RightAlt, -- The real, physical key Rayfield's own built-in toggle listens for. Using a common, well-supported key here (instead of an obscure F-key) avoids VirtualInputManager reliability issues on some executors.
 
    DisableRayfieldPrompts = false,
    DisableBuildWarnings = false, -- Prevents Rayfield from warning when the script has a version mismatch with the interface
@@ -132,7 +132,7 @@ local RequireLookingToggle = Tab:CreateToggle({
 })
 
 local DribbleToggle = Tab:CreateToggle({
-   Name = "Auto Dribble (PC ONLY)",
+   Name = "Auto Dribble",
    CurrentValue = false,
    Flag = "AutoDribble", -- A flag is the identifier for the configuration file, make sure every element has a different flag if you're using configuration saving to ensure no overlaps
    Callback = function(Value)
@@ -162,16 +162,16 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 getgenv().DraggableButtonEnabled = true
-getgenv().UIOpenKeybind = Enum.KeyCode.RightAlt -- The key that triggers the internal F15 press below
+getgenv().UIOpenKeybind = Enum.KeyCode.K -- Your custom/rebindable key. Pressing this simulates a RightAlt press below, which is what Rayfield actually listens for.
 getgenv().RayfieldButtonPosition = UDim2.new(0.5, -30, 0.3, 0) -- Default/last saved position
 
 local RayfieldIsOpen = true -- Rayfield opens by default after the loading screen
 
--- Simulates the internal keybind Rayfield actually listens for
+-- Simulates a press of Rayfield's real ToggleUIKeybind (RightAlt), so any key you rebind still reaches it
 local function SimulateInternalToggle()
-   VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F15, false, game)
+   VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.RightAlt, false, game)
    task.wait()
-   VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F15, false, game)
+   VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.RightAlt, false, game)
 end
 
 -- ScreenGui + button setup
@@ -305,11 +305,11 @@ local KeybindInput = SettingsTab:CreateInput({
       end)
 
       if Success and KeyCodeOrError then
-         if KeyCodeOrError == Enum.KeyCode.F15 then
+         if KeyCodeOrError == Enum.KeyCode.RightAlt then
             Rayfield:Notify({
                Title = "Reserved Keybind",
-               Content = "F15 is reserved internally and can't be used here. Please pick a different key.",
-               Duration = 5,
+               Content = "RightAlt is Rayfield's own built-in toggle key. Binding your key to it too would cause double-toggling. Please pick a different key.",
+               Duration = 6,
             })
             return
          end
