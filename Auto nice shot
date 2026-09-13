@@ -1,5 +1,4 @@
 local player = game.Players.LocalPlayer
-local ball = workspace:WaitForChild("Ball")
 local Event = game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("UseMove")
 local RunService = game:GetService("RunService")
 
@@ -11,25 +10,41 @@ local function getHRP()
     return character:FindFirstChild("HumanoidRootPart")
 end
 
+local function getBall()
+    return workspace:FindFirstChild("Ball")
+end
+
+player.CharacterAdded:Connect(function()
+    canFire = true
+end)
+
 RunService.RenderStepped:Connect(function()
     if not getgenv().AutoNiceShotEnabled then return end
 
-    local hrp = getHRP()
-    if not hrp then return end
+    local success, err = pcall(function()
+        local hrp = getHRP()
+        if not hrp then return end
 
-    local ballPos = ball.Position
-    local distance = (hrp.Position - ballPos).Magnitude
-    local triggerDistance = getgenv().AutoNiceShotDistance or 60
+        local ball = getBall()
+        if not ball then return end
 
-    if distance <= triggerDistance and canFire then
-        canFire = false
+        local triggerDistance = math.clamp(getgenv().AutoNiceShotDistance or 60, 0, 60)
+        local distance = (hrp.Position - ball.Position).Magnitude
 
-        Event:InvokeServer(2, {
-            NiceShot = hrp.Position
-        })
+        if distance <= triggerDistance and canFire then
+            canFire = false
 
-        task.delay(0.2, function()
-            canFire = true
-        end)
+            Event:InvokeServer(2, {
+                NiceShot = hrp.Position
+            })
+
+            task.delay(0.2, function()
+                canFire = true
+            end)
+        end
+    end)
+
+    if not success then
+        warn("Auto Nice Shot error: " .. tostring(err))
     end
 end)
