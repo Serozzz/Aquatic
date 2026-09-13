@@ -3,7 +3,6 @@ local ball = workspace:WaitForChild("Ball")
 local Event = game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("UseMove")
 local RunService = game:GetService("RunService")
 
-local triggerDistance = 60
 local canFire = true
 
 local function getHRP()
@@ -13,11 +12,14 @@ local function getHRP()
 end
 
 RunService.RenderStepped:Connect(function()
+    if not getgenv().AutoNiceShotEnabled then return end
+
     local hrp = getHRP()
     if not hrp then return end
 
     local ballPos = ball.Position
     local distance = (hrp.Position - ballPos).Magnitude
+    local triggerDistance = getgenv().AutoNiceShotDistance or 60
 
     if distance <= triggerDistance and canFire then
         canFire = false
