@@ -1,14 +1,3 @@
--- [DIO's Time Stop Script] -- (fixed: survives death/respawn)
-
--- Based on the main ability of DIO's Stand, The World, from Part 3 of JoJo's Bizarre Adventure.
--- Original by Tsuagon (screenshake portion adapted from a public tutorial).
--- This revision fixes the "breaks after i die" bug by rebuilding all character-bound
--- instances on respawn and forcibly resetting time-stop state when the humanoid dies.
-
-----------------------------------------------------------------------------------------------------
--- Services / persistent stuff --
-----------------------------------------------------------------------------------------------------
-
 local Players = game:GetService("Players")
 local tween = game:GetService("TweenService")
 local lighting = game:GetService("Lighting")
@@ -192,11 +181,6 @@ function tsteleport()
 end
 
 mouse.KeyDown:Connect(function(key)
-	if key == "f" and stoppedtime == false then
-		timestop()
-	elseif key == "f" and stoppedtime == true then
-		timeresume()
-	end
 	if key == "v" and stoppedtime == false then
 		tsteleport()
 	end
