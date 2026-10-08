@@ -1,50 +1,28 @@
--- LocalScript: put in StarterPlayer > StarterPlayerScripts (or StarterCharacterScripts)
--- Swaps the default Animate script's animations to the SRBG Animation Pack (R15).
+-- Script (server): put in ServerScriptService
+-- Applies the SRBG animation pack via HumanoidDescription (works with catalog bundle animations).
 
 local Players = game:GetService("Players")
-local player = Players.LocalPlayer
 
 local PACK = {
-	idle     = { "rbxassetid://80284382285775", "rbxassetid://80284382285775" }, -- Animation1, Animation2
-	walk     = "rbxassetid://115610443689372",
-	run      = "rbxassetid://132771288298297",
-	jump     = "rbxassetid://128724226100004",
-	fall     = "rbxassetid://99424564872375",
-	climb    = "rbxassetid://73300108309416",
-	swim     = "rbxassetid://93136005712341",
-	swimidle = "rbxassetid://93136005712341",
+	IdleAnimation  = 80284382285775,
+	WalkAnimation  = 115610443689372,
+	RunAnimation   = 132771288298297,
+	JumpAnimation  = 128724226100004,
+	FallAnimation  = 99424564872375,
+	ClimbAnimation = 73300108309416,
+	SwimAnimation  = 93136005712341,
 }
 
 local function apply(character)
 	local humanoid = character:WaitForChild("Humanoid")
-	local animator = humanoid:WaitForChild("Animator")
-	local animate = character:WaitForChild("Animate")
-
-	local function set(folderName, animName, id)
-		local folder = animate:FindFirstChild(folderName)
-		local anim = folder and folder:FindFirstChild(animName)
-		if anim and id then
-			anim.AnimationId = id
-		end
+	local desc = humanoid:WaitForChild("HumanoidDescription", 5) or humanoid:GetAppliedDescription()
+	desc = desc:Clone()
+	for prop, id in pairs(PACK) do
+		desc[prop] = id
 	end
-
-	set("idle", "Animation1", PACK.idle[1])
-	set("idle", "Animation2", PACK.idle[2])
-	set("walk", "WalkAnim", PACK.walk)
-	set("run", "RunAnim", PACK.run)
-	set("jump", "JumpAnim", PACK.jump)
-	set("fall", "FallAnim", PACK.fall)
-	set("climb", "ClimbAnim", PACK.climb)
-	set("swim", "Swim", PACK.swim)
-	set("swimidle", "SwimIdle", PACK.swimidle)
-
-	-- Stop currently playing tracks so the new ones load right away
-	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-		track:Stop(0)
-	end
+	humanoid:ApplyDescription(desc)
 end
 
-if player.Character then
-	task.spawn(apply, player.Character)
-end
-player.CharacterAdded:Connect(apply)
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAppearanceLoaded:Connect(apply)
+end)
