@@ -1,8 +1,9 @@
--- LocalScript: put in StarterPlayer > StarterCharacterScripts
--- Swaps the default Animate script's animations to another pack.
--- Replace the rbxassetid values with the animation IDs of your pack.
+-- LocalScript: put in StarterPlayer > StarterPlayerScripts (or StarterCharacterScripts)
+-- Swaps the default Animate script's animations to the SRBG Animation Pack (R15).
 
--- [R6] SRBG Animation Pack
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
 local PACK = {
 	idle     = { "rbxassetid://80284382285775", "rbxassetid://80284382285775" }, -- Animation1, Animation2
 	walk     = "rbxassetid://115610443689372",
@@ -14,30 +15,36 @@ local PACK = {
 	swimidle = "rbxassetid://93136005712341",
 }
 
-local character = script.Parent
-local humanoid = character:WaitForChild("Humanoid")
-local animator = humanoid:WaitForChild("Animator")
-local animate = character:WaitForChild("Animate")
+local function apply(character)
+	local humanoid = character:WaitForChild("Humanoid")
+	local animator = humanoid:WaitForChild("Animator")
+	local animate = character:WaitForChild("Animate")
 
-local function set(folderName, animName, id)
-	local folder = animate:FindFirstChild(folderName)
-	local anim = folder and folder:FindFirstChild(animName)
-	if anim and id and id ~= "rbxassetid://0" then
-		anim.AnimationId = id
+	local function set(folderName, animName, id)
+		local folder = animate:FindFirstChild(folderName)
+		local anim = folder and folder:FindFirstChild(animName)
+		if anim and id then
+			anim.AnimationId = id
+		end
+	end
+
+	set("idle", "Animation1", PACK.idle[1])
+	set("idle", "Animation2", PACK.idle[2])
+	set("walk", "WalkAnim", PACK.walk)
+	set("run", "RunAnim", PACK.run)
+	set("jump", "JumpAnim", PACK.jump)
+	set("fall", "FallAnim", PACK.fall)
+	set("climb", "ClimbAnim", PACK.climb)
+	set("swim", "Swim", PACK.swim)
+	set("swimidle", "SwimIdle", PACK.swimidle)
+
+	-- Stop currently playing tracks so the new ones load right away
+	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+		track:Stop(0)
 	end
 end
 
-set("idle", "Animation1", PACK.idle[1])
-set("idle", "Animation2", PACK.idle[2])
-set("walk", "WalkAnim", PACK.walk)
-set("run", "RunAnim", PACK.run)
-set("jump", "JumpAnim", PACK.jump)
-set("fall", "FallAnim", PACK.fall)
-set("climb", "ClimbAnim", PACK.climb)
-set("swim", "Swim", PACK.swim)
-set("swimidle", "SwimIdle", PACK.swimidle)
-
--- Stop currently playing tracks so the new ones load right away
-for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-	track:Stop(0)
+if player.Character then
+	task.spawn(apply, player.Character)
 end
+player.CharacterAdded:Connect(apply)
