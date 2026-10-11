@@ -8,7 +8,7 @@ pcall(function()
 		Title = "Thanks for using!",
 		Text = "Made by WaveStorag, Edited by Seroz",
 		Duration = 15,
-		Icon = "rbxassetid://132467519769524",
+		Icon = "rbxassetid://87310929143455",
 	})
 end)
 
