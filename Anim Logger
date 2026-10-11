@@ -1,249 +1,430 @@
--- Made by WaveStorag and ChatGPT
--- Upload: 19/5/2024 | Update: 21/5/2024
+-- Animation Logger (redesigned UI)
+-- Logs animations played by your character, lets you copy the ID/link,
+-- and play any logged animation on your own character.
 
-game:GetService("StarterGui"):SetCore("SendNotification", {
-    Title = "Thx for using🤑",
-    Text = "Made by WaveStorag",
-    Duration = 15,
-    Icon = "rbxassetid://17395172104"
-})
+-- ===== Notification (from the original) =====
+pcall(function()
+	game:GetService("StarterGui"):SetCore("SendNotification", {
+		Title = "Thanks for using!",
+		Text = "Made by WaveStorag, Edited by Seroz",
+		Duration = 15,
+		Icon = "rbxassetid://87310929143455",
+	})
+end)
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+
+-- ===== Theme =====
+local C = {
+	bg = Color3.fromRGB(18, 18, 24),
+	header = Color3.fromRGB(26, 26, 36),
+	card = Color3.fromRGB(32, 32, 44),
+	cardHover = Color3.fromRGB(42, 42, 58),
+	accent = Color3.fromRGB(110, 120, 255),
+	text = Color3.fromRGB(235, 235, 245),
+	subtext = Color3.fromRGB(150, 150, 170),
+	off = Color3.fromRGB(60, 60, 78),
+	danger = Color3.fromRGB(235, 87, 87),
+	success = Color3.fromRGB(80, 200, 120),
+}
+
+local FONT = Enum.Font.GothamMedium
+local FONT_BOLD = Enum.Font.GothamBold
+
+-- ===== Helpers =====
+local function corner(parent, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius)
+	c.Parent = parent
+	return c
+end
+
+local function stroke(parent, color, thickness, transparency)
+	local s = Instance.new("UIStroke")
+	s.Color = color
+	s.Thickness = thickness or 1
+	s.Transparency = transparency or 0
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = parent
+	return s
+end
+
+local function tween(obj, props, t)
+	TweenService:Create(obj, TweenInfo.new(t or 0.15, Enum.EasingStyle.Quad), props):Play()
+end
+
+local function label(parent, text, size, color, font, xAlign)
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Text = text
+	l.TextSize = size
+	l.TextColor3 = color
+	l.Font = font or FONT
+	l.TextXAlignment = xAlign or Enum.TextXAlignment.Left
+	l.Parent = parent
+	return l
+end
+
+local function iconButton(parent, text, color)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(0, 26, 0, 26)
+	b.BackgroundColor3 = color
+	b.BackgroundTransparency = 0.8
+	b.Text = text
+	b.TextColor3 = C.text
+	b.TextSize = 16
+	b.Font = FONT_BOLD
+	b.AutoButtonColor = false
+	b.Parent = parent
+	corner(b, 8)
+	b.MouseEnter:Connect(function() tween(b, { BackgroundTransparency = 0.4 }) end)
+	b.MouseLeave:Connect(function() tween(b, { BackgroundTransparency = 0.8 }) end)
+	return b
+end
+
+local function toolbarButton(parent, text, color, width, xOffset)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(0, width, 0, 28)
+	b.Position = UDim2.new(1, xOffset, 0.5, -14)
+	b.BackgroundColor3 = color
+	b.BackgroundTransparency = 0.8
+	b.Text = text
+	b.TextColor3 = color
+	b.TextSize = 13
+	b.Font = FONT_BOLD
+	b.AutoButtonColor = false
+	b.Parent = parent
+	corner(b, 8)
+	b.MouseEnter:Connect(function() tween(b, { BackgroundTransparency = 0.6 }) end)
+	b.MouseLeave:Connect(function() tween(b, { BackgroundTransparency = 0.8 }) end)
+	return b
+end
+
+local clipboard = setclipboard or toclipboard or (Clipboard and Clipboard.set)
+
+-- ===== State =====
+local logged = {}
+local count = 0
+local copyAsLink = false
+
+-- Playback state (animations played on your own character)
+local playingTracks = {}   -- every track this tool has created
+local activeTrack          -- the one currently playing
+local activeStroke         -- outline of the playing card
+
+-- ===== Root GUI =====
+local old = player:WaitForChild("PlayerGui"):FindFirstChild("AnimationLoggerUI")
+if old then old:Destroy() end
 
 local gui = Instance.new("ScreenGui")
-gui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+gui.Name = "AnimationLoggerUI"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = player:WaitForChild("PlayerGui")
 
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0.315, 0, 0.4, 0)
-frame.Position = UDim2.new(0.350, 0, 0.3, 0)
-frame.BackgroundColor3 = Color3.new(0, 0, 0)
-frame.BorderSizePixel = 0
-frame.Parent = gui
-frame.Draggable = true
-frame.Active = true
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Size = UDim2.new(0, 340, 0, 420)
+main.Position = UDim2.new(0.5, -170, 0.5, -210)
+main.BackgroundColor3 = C.bg
+main.BorderSizePixel = 0
+main.ClipsDescendants = true
+main.Parent = gui
+corner(main, 14)
+stroke(main, C.accent, 1.5, 0.6)
 
-local topBar = Instance.new("Frame")
-topBar.Size = UDim2.new(1.0017, 0, 0, 30)
-topBar.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
-topBar.BorderSizePixel = 0
-topBar.Parent = frame
+-- ===== Header =====
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 44)
+header.BackgroundColor3 = C.header
+header.BorderSizePixel = 0
+header.Parent = main
 
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, -365, 1, 0)
-titleLabel.Position = UDim2.new(0, 0, 0, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "Animation Logger"
-titleLabel.Font = Enum.Font.SourceSans
-titleLabel.TextColor3 = Color3.new(1, 1, 1)
-titleLabel.TextSize = 20
-titleLabel.Parent = topBar
+local title = label(header, "Animation Logger", 16, C.text, FONT_BOLD)
+title.Size = UDim2.new(1, -110, 1, 0)
+title.Position = UDim2.new(0, 16, 0, 0)
 
-local scrollFrame = Instance.new("ScrollingFrame")
-scrollFrame.Size = UDim2.new(1, 0, 1, -30)
-scrollFrame.Position = UDim2.new(0, 0, 0, 30)
-scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-scrollFrame.ScrollBarThickness = 10
-scrollFrame.Parent = frame
-scrollFrame.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+local badge = label(header, "0", 12, C.text, FONT_BOLD, Enum.TextXAlignment.Center)
+badge.Size = UDim2.new(0, 28, 0, 20)
+badge.Position = UDim2.new(1, -108, 0.5, -10)
+badge.BackgroundTransparency = 0
+badge.BackgroundColor3 = C.accent
+corner(badge, 10)
 
-local logLayout = Instance.new("UIListLayout")
-logLayout.Parent = scrollFrame
-logLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local minBtn = iconButton(header, "–", C.subtext)
+minBtn.Position = UDim2.new(1, -70, 0.5, -13)
 
-local loggedAnimations = {}
-local isCopyingAsLinkEnabled = false
-local originalColor = Color3.new(0.2, 0.2, 0.2)
-local toggleColor = Color3.new(0, 1, 0)
+local closeBtn = iconButton(header, "✕", C.danger)
+closeBtn.Position = UDim2.new(1, -38, 0.5, -13)
+closeBtn.TextSize = 13
 
-local function logAnimation(animationName, animationId)
-    if loggedAnimations[animationId] then
-        return
-    end
-    
-    loggedAnimations[animationId] = true
-    
-    local numericId = tonumber(animationId:match("%d+"))
+-- ===== Body =====
+local body = Instance.new("Frame")
+body.Name = "Body"
+body.Size = UDim2.new(1, 0, 1, -44)
+body.Position = UDim2.new(0, 0, 0, 44)
+body.BackgroundTransparency = 1
+body.Parent = main
 
-    local logEntry = Instance.new("TextButton")
-    logEntry.Size = UDim2.new(1, -10, 0, 60)
-    logEntry.BackgroundColor3 = originalColor
-    local linkStatus = isCopyingAsLinkEnabled and "Enabled" or "Disabled"
-    logEntry.Text = string.format("%s\nAnimation ID: %d\nCopy as link: %s", animationName, numericId, linkStatus)
-    logEntry.TextWrapped = true
-    logEntry.Font = Enum.Font.SourceSans
-    logEntry.TextColor3 = Color3.new(1, 1, 1)
-    logEntry.TextSize = 22
-    logEntry.Parent = scrollFrame
+-- Toolbar
+local toolbar = Instance.new("Frame")
+toolbar.Size = UDim2.new(1, -24, 0, 36)
+toolbar.Position = UDim2.new(0, 12, 0, 10)
+toolbar.BackgroundTransparency = 1
+toolbar.Parent = body
 
-    logEntry.MouseButton1Click:Connect(function()
-        if isCopyingAsLinkEnabled then
-            local link = "https://www.roblox.com/library/" .. numericId
-            setclipboard(link)
-        else
-            setclipboard(tostring(numericId))
-        end
-    end)
+local linkLabel = label(toolbar, "Copy as link", 13, C.subtext)
+linkLabel.Size = UDim2.new(0, 90, 1, 0)
 
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, logLayout.AbsoluteContentSize.Y)
+local switch = Instance.new("TextButton")
+switch.Size = UDim2.new(0, 40, 0, 22)
+switch.Position = UDim2.new(0, 94, 0.5, -11)
+switch.BackgroundColor3 = C.off
+switch.Text = ""
+switch.AutoButtonColor = false
+switch.Parent = toolbar
+corner(switch, 11)
+
+local knob = Instance.new("Frame")
+knob.Size = UDim2.new(0, 16, 0, 16)
+knob.Position = UDim2.new(0, 3, 0.5, -8)
+knob.BackgroundColor3 = C.text
+knob.BorderSizePixel = 0
+knob.Parent = switch
+corner(knob, 8)
+
+local clearBtn = toolbarButton(toolbar, "Clear all", C.danger, 76, -76)
+local stopBtn = toolbarButton(toolbar, "■ Stop", C.success, 64, -148)
+
+-- List
+local list = Instance.new("ScrollingFrame")
+list.Size = UDim2.new(1, -24, 1, -62)
+list.Position = UDim2.new(0, 12, 0, 54)
+list.BackgroundTransparency = 1
+list.BorderSizePixel = 0
+list.ScrollBarThickness = 4
+list.ScrollBarImageColor3 = C.accent
+list.CanvasSize = UDim2.new()
+list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+list.Parent = body
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 8)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Parent = list
+
+local listPad = Instance.new("UIPadding")
+listPad.PaddingRight = UDim.new(0, 8)
+listPad.Parent = list
+
+local empty = label(list, "Play an animation to log it here", 13, C.subtext, FONT, Enum.TextXAlignment.Center)
+empty.Size = UDim2.new(1, 0, 0, 60)
+
+-- ===== Playback =====
+local function getAnimator()
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then return nil end
+	return hum:FindFirstChildOfClass("Animator") or hum
 end
 
-logLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, logLayout.AbsoluteContentSize.Y)
+local function stopPlayback()
+	for _, t in ipairs(playingTracks) do
+		pcall(function()
+			t:Stop(0.1)
+			t:Destroy()
+		end)
+	end
+	table.clear(playingTracks)
+	activeTrack = nil
+	if activeStroke then
+		activeStroke.Transparency = 1
+		activeStroke = nil
+	end
+end
+
+-- Returns true if it started playing
+local function playAnimation(animationId, cardStroke)
+	stopPlayback()
+	local animator = getAnimator()
+	if not animator then return false end
+
+	local anim = Instance.new("Animation")
+	anim.AnimationId = animationId
+	local ok, track = pcall(function()
+		return animator:LoadAnimation(anim)
+	end)
+	if not ok or not track then return false end
+
+	track.Priority = Enum.AnimationPriority.Action4
+	track.Looped = true
+	track:Play(0.1, 1, 1)
+	table.insert(playingTracks, track)
+	activeTrack = track
+	activeStroke = cardStroke
+	cardStroke.Transparency = 0
+	return true
+end
+
+-- ===== Logic =====
+local function setBadge()
+	badge.Text = tostring(count)
+	empty.Visible = count == 0
+end
+
+local function setSwitch(on)
+	copyAsLink = on
+	tween(switch, { BackgroundColor3 = on and C.accent or C.off })
+	tween(knob, { Position = on and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8) })
+end
+
+switch.MouseButton1Click:Connect(function()
+	setSwitch(not copyAsLink)
 end)
 
-local function onAnimationPlayed(animationTrack)
-    local animation = animationTrack.Animation
-    if animation then
-        local animationId = animation.AnimationId
-        local animationName = animation.Name or "Unknown Animation"
-        logAnimation(animationName, animationId, isCopyingAsLinkEnabled)
-    end
+local order = 0
+local function logAnimation(name, animationId)
+	local numericId = tonumber(tostring(animationId):match("%d+"))
+	if not numericId or logged[numericId] then return end
+	logged[numericId] = true
+	count += 1
+	order -= 1 -- newest on top
+	setBadge()
+
+	local card = Instance.new("TextButton")
+	card.Size = UDim2.new(1, 0, 0, 58)
+	card.BackgroundColor3 = C.card
+	card.Text = ""
+	card.AutoButtonColor = false
+	card.LayoutOrder = order
+	card.Parent = list
+	corner(card, 10)
+	local playStroke = stroke(card, C.success, 1.5, 1)
+
+	local nameL = label(card, name, 14, C.text, FONT_BOLD)
+	nameL.Size = UDim2.new(1, -90, 0, 20)
+	nameL.Position = UDim2.new(0, 12, 0, 9)
+	nameL.TextTruncate = Enum.TextTruncate.AtEnd
+
+	local idL = label(card, "ID  " .. numericId .. "   ·   click to play", 12, C.subtext)
+	idL.Size = UDim2.new(1, -90, 0, 18)
+	idL.Position = UDim2.new(0, 12, 0, 30)
+	idL.TextTruncate = Enum.TextTruncate.AtEnd
+
+	local copyL = Instance.new("TextButton")
+	copyL.Text = "COPY"
+	copyL.TextSize = 11
+	copyL.TextColor3 = C.accent
+	copyL.Font = FONT_BOLD
+	copyL.AutoButtonColor = false
+	copyL.Size = UDim2.new(0, 56, 0, 26)
+	copyL.Position = UDim2.new(1, -66, 0.5, -13)
+	copyL.BackgroundTransparency = 0.85
+	copyL.BackgroundColor3 = C.accent
+	copyL.Parent = card
+	corner(copyL, 8)
+
+	card.MouseEnter:Connect(function() tween(card, { BackgroundColor3 = C.cardHover }) end)
+	card.MouseLeave:Connect(function() tween(card, { BackgroundColor3 = C.card }) end)
+
+	-- Click the card: play it on your character. Click again to stop.
+	card.MouseButton1Click:Connect(function()
+		if activeStroke == playStroke then
+			stopPlayback()
+		else
+			playAnimation(animationId, playStroke)
+		end
+	end)
+
+	copyL.MouseButton1Click:Connect(function()
+		local value = copyAsLink and ("https://www.roblox.com/library/" .. numericId) or tostring(numericId)
+		if clipboard then
+			clipboard(value)
+			copyL.Text = "COPIED"
+			copyL.TextColor3 = C.success
+		else
+			print("[AnimationLogger] " .. value)
+			copyL.Text = "PRINTED"
+		end
+		task.delay(1.2, function()
+			if copyL.Parent then
+				copyL.Text = "COPY"
+				copyL.TextColor3 = C.accent
+			end
+		end)
+	end)
 end
 
-local function trackPlayerAnimations()
-    local player = game.Players.LocalPlayer
-    local character = player.Character or player.CharacterAdded:Wait()
-    local humanoid = character:WaitForChild("Humanoid")
-    
-    humanoid.AnimationPlayed:Connect(onAnimationPlayed)
-end
+stopBtn.MouseButton1Click:Connect(stopPlayback)
 
-trackPlayerAnimations()
-
-local xButton = Instance.new("TextButton")
-xButton.Size = UDim2.new(0, 30, 0, 30)
-xButton.Position = UDim2.new(1, -30, 0, 0)
-xButton.BackgroundColor3 = Color3.new(1, 0, 0)
-xButton.Text = "X"
-xButton.TextColor3 = Color3.new(1, 1, 1)
-xButton.TextSize = 24
-xButton.Font = Enum.Font.SourceSans
-xButton.BackgroundTransparency = 1
-xButton.Parent = topBar
-
-xButton.MouseButton1Click:Connect(function()
-    gui:Destroy()
+clearBtn.MouseButton1Click:Connect(function()
+	stopPlayback()
+	for _, child in ipairs(list:GetChildren()) do
+		if child:IsA("TextButton") then child:Destroy() end
+	end
+	table.clear(logged)
+	count = 0
+	setBadge()
 end)
 
-local minimizeButton = Instance.new("TextButton")
-minimizeButton.Size = UDim2.new(0, 30, 0, 30)
-minimizeButton.Position = UDim2.new(1, -60, 0, 0)
-minimizeButton.BackgroundColor3 = Color3.new(0, 0, 1)
-minimizeButton.Text = "–"
-minimizeButton.TextColor3 = Color3.new(1, 1, 1)
-minimizeButton.TextSize = 24
-minimizeButton.Font = Enum.Font.SourceSans
-minimizeButton.BackgroundTransparency = 1
-minimizeButton.Parent = topBar
-
-local additionalGUI = Instance.new("Frame")
-additionalGUI.Size = UDim2.new(0.5, 0, 1, 0)
-additionalGUI.Position = UDim2.new(-0.53, 0, 0, 0)
-additionalGUI.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-additionalGUI.BorderSizePixel = 0
-additionalGUI.Visible = false
-additionalGUI.Parent = frame
-
-local settingsTopBar = Instance.new("Frame")
-settingsTopBar.Size = UDim2.new(1, 0, 0, 30)
-settingsTopBar.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
-settingsTopBar.BorderSizePixel = 0
-settingsTopBar.Parent = additionalGUI
-
-local settingsLabel = Instance.new("TextLabel")
-settingsLabel.Size = UDim2.new(1, 0, 0, 30)
-settingsLabel.Position = UDim2.new(0, 0, 0, 0)
-settingsLabel.BackgroundTransparency = 1
-settingsLabel.Text = "Settings"
-settingsLabel.Font = Enum.Font.SourceSans
-settingsLabel.TextColor3 = Color3.new(1, 1, 1)
-settingsLabel.TextSize = 20
-settingsLabel.Parent = additionalGUI
-
-local clearButton = Instance.new("TextButton")
-clearButton.Size = UDim2.new(0.95, 0, 0, 30)
-clearButton.Position = UDim2.new(0.023, 0, 0, 40)
-clearButton.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
-clearButton.Text = "Clear All"
-clearButton.TextColor3 = Color3.new(1, 1, 1)
-clearButton.TextSize = 18
-clearButton.Font = Enum.Font.SourceSans
-clearButton.Parent = additionalGUI
-
-local optionalSettingToggle = Instance.new("TextButton")
-optionalSettingToggle.Size = UDim2.new(0.95, 0, 0, 30)
-optionalSettingToggle.Position = UDim2.new(0.023, 0, 0, 80)
-optionalSettingToggle.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
-optionalSettingToggle.Text = "Copy as link"
-optionalSettingToggle.TextColor3 = Color3.new(1, 1, 1)
-optionalSettingToggle.TextSize = 18
-optionalSettingToggle.Font = Enum.Font.SourceSans
-optionalSettingToggle.Parent = additionalGUI
-
-local toggleButton = Instance.new("ImageButton")
-toggleButton.Size = UDim2.new(0, 30, 0, 30)
-toggleButton.Position = UDim2.new(0.002, 0, 0, 0)
-toggleButton.BackgroundTransparency = 1
-toggleButton.Image = "rbxassetid://11932591062"
-toggleButton.Parent = topBar
-
-toggleButton.MouseButton1Click:Connect(function()
-    additionalGUI.Visible = not additionalGUI.Visible
+-- ===== Minimize / Close =====
+local minimized = false
+local fullSize = main.Size
+minBtn.MouseButton1Click:Connect(function()
+	minimized = not minimized
+	minBtn.Text = minimized and "+" or "–"
+	body.Visible = not minimized
+	tween(main, { Size = minimized and UDim2.new(0, fullSize.X.Offset, 0, 44) or fullSize }, 0.2)
 end)
 
-local isMinimized = false
-local originalSize = frame.Size
-local originalTitlePosition = titleLabel.Position
-
-minimizeButton.MouseButton1Click:Connect(function()
-    isMinimized = not isMinimized
-    if isMinimized then
-        minimizeButton.Text = "+"
-        frame.Size = UDim2.new(originalSize.X.Scale, originalSize.X.Offset, 0, 30)
-scrollFrame.Visible = false
-        additionalGUI.Visible = false
-        toggleButton.Visible = false
-        titleLabel.Position = UDim2.new(originalTitlePosition.X.Scale, originalTitlePosition.X.Offset - 20, originalTitlePosition.Y.Scale, originalTitlePosition.Y.Offset)
-    else
-        minimizeButton.Text = "–"
-        frame.Size = originalSize
-        scrollFrame.Visible = true
-        toggleButton.Visible = true
-        titleLabel.Position = originalTitlePosition
-    end
+closeBtn.MouseButton1Click:Connect(function()
+	stopPlayback()
+	gui:Destroy()
 end)
 
-clearButton.MouseButton1Click:Connect(function()
-    for _, child in ipairs(scrollFrame:GetChildren()) do
-        if child:IsA("TextButton") then
-            child:Destroy()
-        end
-    end
-    loggedAnimations = {}
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+-- ===== Dragging (mouse + touch) =====
+do
+	local dragging, dragStart, startPos
+	header.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = main.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			local d = input.Position - dragStart
+			main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+end
+
+-- ===== Animation tracking (survives respawn) =====
+local function hook(character)
+	local humanoid = character:WaitForChild("Humanoid")
+	local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid
+	animator.AnimationPlayed:Connect(function(track)
+		local anim = track.Animation
+		if anim then
+			logAnimation(anim.Name ~= "" and anim.Name or "Unknown Animation", anim.AnimationId)
+		end
+	end)
+end
+
+if player.Character then task.spawn(hook, player.Character) end
+player.CharacterAdded:Connect(function(char)
+	stopPlayback()
+	hook(char)
 end)
 
-local function toggleOptionalSetting()
-    isCopyingAsLinkEnabled = not isCopyingAsLinkEnabled
-    optionalSettingToggle.BackgroundColor3 = isCopyingAsLinkEnabled and toggleColor or originalColor
-    print("Copying as link " .. (isCopyingAsLinkEnabled and "enabled" or "disabled"))
-end
-
-optionalSettingToggle.MouseButton1Click:Connect(toggleOptionalSetting)
-
-local function onAnimationPlayed(animationTrack)
-    local animation = animationTrack.Animation
-    if animation then
-        local animationId = animation.AnimationId
-        local animationName = animation.Name or "Unknown Animation"
-        logAnimation(animationName, animationId)
-    end
-end
-
-local function trackPlayerAnimations()
-    local player = game.Players.LocalPlayer
-    local character = player.Character or player.CharacterAdded:Wait()
-    local humanoid = character:WaitForChild("Humanoid")
-    
-    humanoid.AnimationPlayed:Connect(onAnimationPlayed)
-end
-
-trackPlayerAnimations()
+setBadge()
