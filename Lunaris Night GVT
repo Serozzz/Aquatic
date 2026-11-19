@@ -1,0 +1,75 @@
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+local Window = WindUI:CreateWindow({
+    Title = "Lunaris Night",
+    Author = "Seroz",
+    Folder = "Lunaris Night Configs",
+    Size = UDim2.fromOffset(580, 460),
+    Icon = "rbxassetid://138234690869720",
+    Background = "rbxassetid://106387220207968",
+    BackgroundImageTransparency = 0.15,
+    Transparent = true,
+    Theme = "Dark",
+})
+
+local MainTab = Window:Tab({
+    Title = "Main",
+    Icon = "home", -- Lucide icon name or rbxassetid://
+})
+
+local Section = MainTab:Section({
+    Title = "?",
+    TextXAlignment = "Left",
+    TextSize = 17,
+})
+
+MainTab:Divider()
+MainTab:Space()
+
+MainTab:Button({
+    Title = "?",
+    Desc = "?",
+    Locked = true, -- Set true to disable clicking
+    Callback = function()
+        print("?")
+    end,
+})
+
+local MyToggle = MainTab:Toggle({
+    Title = "Auto Domain Clash",
+    Desc = "Experimental",
+    Value = false, -- Starting state
+    Callback = function(state)
+        print("Toggle is now:", state)
+    end,
+})
+-- Optional: MyToggle:Set(true) to change it via code
+
+local InfoPara = MainTab:Paragraph({
+    Title = "Discord",
+    Desc = "Coming Soon.",
+    Image = "info",
+    ImageSize = 20,
+    Buttons = {
+        {
+            Title = "Copy Link",
+            Icon = "copy",
+            Callback = function()
+                setclipboard("https://example.com")
+            end,
+        }
+    }
+})
+-- Optional: InfoPara:SetDesc("Updated text!")
+
+MainTab:Code({
+    Title = "Example Snippet",
+    Code = [[print("Hello from WindUI!")]],
+})
+
+WindUI:Notify({
+    Title = "Loaded",
+    Content = "supercalifragilisticexpliadocious",
+    Icon = "check",
+    Duration = 4,
+})
