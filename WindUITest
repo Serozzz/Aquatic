@@ -1,0 +1,153 @@
+local Window = WindUI:CreateWindow({
+    Title = "test",
+    Author = "by You",
+    Folder = "TestingConfigs",
+    Size = UDim2.fromOffset(580, 460),
+    Icon = "rbxassetid://94058685858505",
+    Background = "rbxassetid://106387220207968",
+    BackgroundImageTransparency = 0.15,
+    Transparent = true,
+    Theme = "Dark",
+})
+
+local MainTab = Window:Tab({
+    Title = "Main",
+    Icon = "home", -- Lucide icon name or rbxassetid://
+})
+
+local Section = MainTab:Section({
+    Title = "Player Controls",
+    TextXAlignment = "Left",
+    TextSize = 17,
+})
+
+MainTab:Divider()
+MainTab:Space()
+
+MainTab:Button({
+    Title = "Click Me",
+    Desc = "Executes a one-time action",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        print("Button pressed!")
+    end,
+})
+
+local MyToggle = MainTab:Toggle({
+    Title = "Auto Feature",
+    Desc = "Turns feature on or off",
+    Value = false, -- Starting state
+    Callback = function(state)
+        print("Toggle is now:", state)
+    end,
+})
+-- Optional: MyToggle:Set(true) to change it via code
+
+local MySlider = MainTab:Slider({
+    Title = "WalkSpeed",
+    Step = 1,
+    Value = {
+        Min = 16,
+        Max = 200,
+        Default = 16,
+    },
+    Callback = function(value)
+        print("Slider set to:", value)
+    end,
+})
+
+MainTab:Input({
+    Title = "Custom Text",
+    Desc = "Enter a value below",
+    Value = "",
+    Placeholder = "Type here...",
+    Numeric = false, -- Set true to only allow numbers
+    Finished = true, -- Only triggers Callback when Enter is pressed
+    Callback = function(text)
+        print("User typed:", text)
+    end,
+})
+
+local MyDropdown = MainTab:Dropdown({
+    Title = "Select Mode",
+    Values = { "Mode A", "Mode B", "Mode C" },
+    Value = "Mode A", -- Use a table { "Mode A", "Mode B" } if Multi = true
+    Multi = false,
+    AllowNone = false,
+    Callback = function(selected)
+        print("Chosen:", selected)
+    end,
+})
+-- Optional: MyDropdown:Refresh({ "New 1", "New 2" }) to update options later
+
+MainTab:Keybind({
+    Title = "Action Keybind",
+    Desc = "Press a key to trigger",
+    Value = "F",
+    Callback = function(keyName)
+        print("Key pressed:", keyName)
+    end,
+})
+
+MainTab:Colorpicker({
+    Title = "Accent Color",
+    Desc = "Pick a custom color",
+    Default = Color3.fromRGB(0, 170, 255),
+    Transparency = 0, -- Optional alpha slider
+    Callback = function(color, transparency)
+        print("New Color3:", color)
+    end,
+})
+
+local InfoPara = MainTab:Paragraph({
+    Title = "Hub Information",
+    Desc = "Welcome! Select a tab on the left to get started.",
+    Image = "info",
+    ImageSize = 20,
+    Buttons = {
+        {
+            Title = "Copy Link",
+            Icon = "copy",
+            Callback = function()
+                setclipboard("https://example.com")
+            end,
+        }
+    }
+})
+-- Optional: InfoPara:SetDesc("Updated text!")
+
+MainTab:Code({
+    Title = "Example Snippet",
+    Code = [[print("Hello from WindUI!")]],
+})
+
+local Bar = MainTab:ProgressBar({
+    Title = "Loading Assets",
+    Value = 50, -- Percentage from 0 to 100
+})
+-- Update later: Bar:Set(100)
+
+WindUI:Notify({
+    Title = "Loaded",
+    Content = "Your hub is ready!",
+    Icon = "check",
+    Duration = 4,
+})
+
+Window:Dialog({
+    Title = "Confirm Action",
+    Content = "Are you sure you want to reset settings?",
+    Buttons = {
+        {
+            Title = "Confirm",
+            Callback = function()
+                print("Confirmed!")
+            end,
+        },
+        {
+            Title = "Cancel",
+            Variant = "Secondary",
+            Callback = function() end,
+        },
+    },
+})
