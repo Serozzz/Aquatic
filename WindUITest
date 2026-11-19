@@ -1,6 +1,8 @@
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
 local Window = WindUI:CreateWindow({
     Title = "test",
-    Author = "by You",
+    Author = "Seroz",
     Folder = "TestingConfigs",
     Size = UDim2.fromOffset(580, 460),
     Icon = "rbxassetid://94058685858505",
