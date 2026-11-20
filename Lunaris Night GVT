@@ -28,7 +28,7 @@ MainTab:Space()
 
 local InfoPara = MainTab:Paragraph({
     Title = "Abilities",
-    Desc = "Character specific, only works for the character that the ability originates from.",
+    Desc = "Character specific, only works for the character that the ability originates from. (Cooldowns Apply, Cooldown Indicator coming soon.)",
     Image = "info",
     ImageSize = 20,
 })
