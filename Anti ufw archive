@@ -1,0 +1,84 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
+
+local Cast = ReplicatedStorage:WaitForChild("Cast")
+local KJFlexWorks = Cast:WaitForChild("KJFlexWorks")
+local KJVFX = Cast:WaitForChild("KJVFX")
+
+-- Initialize default state if not already set by WindUI
+if getgenv().FlexWorksDetector == nil then
+    getgenv().FlexWorksDetector = false
+end
+
+-- Prevent duplicate listeners if you re-execute this standalone script
+if getgenv().FlexWorksConnection then
+    getgenv().FlexWorksConnection:Disconnect()
+end
+
+local activeTimers = {}
+
+local function stopFlexWorks(targetCharacter)
+    if activeTimers[targetCharacter] then
+        task.cancel(activeTimers[targetCharacter])
+        activeTimers[targetCharacter] = nil
+    end
+
+    if targetCharacter and targetCharacter.Parent then
+        local highlight = targetCharacter:FindFirstChild("FlexWorksHighlight")
+        if highlight then
+            highlight:Destroy()
+        end
+        firesignal(KJVFX.OnClientEvent, "AuraEnd", targetCharacter)
+    end
+end
+
+-- Expose global cleanup function for WindUI to call on toggle-off
+getgenv().StopAllFlexWorks = function()
+    for character, _ in pairs(activeTimers) do
+        stopFlexWorks(character)
+    end
+end
+
+getgenv().FlexWorksConnection = KJFlexWorks.OnClientEvent:Connect(function(action, targetCharacter, flag)
+    if not getgenv().FlexWorksDetector then return end
+    if typeof(targetCharacter) ~= "Instance" then return end
+
+    if action == "Ready" then
+        if activeTimers[targetCharacter] then
+            task.cancel(activeTimers[targetCharacter])
+        end
+
+        local targetPlayer = Players:GetPlayerFromCharacter(targetCharacter)
+        local displayName = targetPlayer and targetPlayer.DisplayName or targetCharacter.Name
+
+        pcall(function()
+            StarterGui:SetCore("SendNotification", {
+                Title = "FlexWorks Triggered",
+                Text = displayName .. " used FlexWorks!",
+                Duration = 5
+            })
+        end)
+
+        local highlight = targetCharacter:FindFirstChild("FlexWorksHighlight")
+        if not highlight then
+            highlight = Instance.new("Highlight")
+            highlight.Name = "FlexWorksHighlight"
+            highlight.FillColor = Color3.fromRGB(255, 0, 0)
+            highlight.FillTransparency = 0.5
+            highlight.OutlineColor = Color3.fromRGB(255, 80, 80)
+            highlight.OutlineTransparency = 0.2
+            highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            highlight.Parent = targetCharacter
+        end
+
+        firesignal(KJVFX.OnClientEvent, "AuraStart", targetCharacter)
+
+        activeTimers[targetCharacter] = task.delay(7, function()
+            stopFlexWorks(targetCharacter)
+        end)
+
+    elseif action == "ReadyEnd" then
+        stopFlexWorks(targetCharacter)
+    end
+end)
