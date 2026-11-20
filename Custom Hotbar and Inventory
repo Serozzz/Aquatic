@@ -10,29 +10,36 @@ local ACCENT = Color3.fromRGB(0, 162, 255) -- Roblox equip blue
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- Keep the default Roblox Backpack disabled (re-disables if the game turns it back on)
-local function disableDefaultBackpack()
+-- Keep the default Roblox Backpack disabled no matter what the game does
+local RunService = game:GetService("RunService")
+
+local function disableDefaultBackpack(force)
 	pcall(function()
-		if StarterGui:GetCoreGuiEnabled(Enum.CoreGuiType.Backpack) then
+		if force or StarterGui:GetCoreGuiEnabled(Enum.CoreGuiType.Backpack) then
 			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 		end
 	end)
 end
 
-disableDefaultBackpack()
+disableDefaultBackpack(true)
 
 pcall(function()
 	StarterGui.CoreGuiChangedSignal:Connect(function(coreGuiType, enabled)
 		if enabled and (coreGuiType == Enum.CoreGuiType.Backpack or coreGuiType == Enum.CoreGuiType.All) then
-			disableDefaultBackpack()
+			disableDefaultBackpack(true)
 		end
 	end)
 end)
 
+-- Checked every frame (before render and after physics) so it never gets a frame on screen
+RunService.RenderStepped:Connect(function() disableDefaultBackpack(false) end)
+RunService.Heartbeat:Connect(function() disableDefaultBackpack(false) end)
+
+-- Hard re-apply a few times a second in case Get lies
 task.spawn(function()
 	while true do
-		disableDefaultBackpack()
-		task.wait(0.5)
+		disableDefaultBackpack(true)
+		task.wait(0.25)
 	end
 end)
 
@@ -44,6 +51,10 @@ local CONFIG = {
 	ShowDropBtn = true,
 	ShowMultiBtn = true,
 	EquipStyle = "Outline", -- "Outline" or "Line"
+	LineBig = false,        -- bigger bottom line
+	LineFull = false,       -- line covers the whole bottom edge
+	UIScale = "Auto",       -- "Auto" or a number (0.5 - 1)
+	InstantUse = false,     -- equip -> activate -> unequip in one press
 }
 
 local SavedOrder = {}       -- [ToolName] = SlotNumber
@@ -79,6 +90,42 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
+-- Root frame: scaled down on small screens (phones). Everything lives inside it.
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.BackgroundTransparency = 1
+root.Position = UDim2.new(0, 0, 0, 0)
+root.Size = UDim2.new(1, 0, 1, 0)
+root.Parent = screenGui
+
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = root
+
+local function computeUIScale()
+	if type(CONFIG.UIScale) == "number" then
+		return CONFIG.UIScale
+	end
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
+	return math.clamp(math.min(vp.X / 1000, vp.Y / 520), 0.55, 1)
+end
+
+local function applyUIScale()
+	local s = computeUIScale()
+	uiScale.Scale = s
+	root.Size = UDim2.new(1 / s, 0, 1 / s, 0)
+end
+
+local function hookCamera()
+	local cam = workspace.CurrentCamera
+	if cam then
+		cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyUIScale)
+	end
+	applyUIScale()
+end
+hookCamera()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(hookCamera)
+
 -- Ghost icon shown while dragging
 local dragGhost = Instance.new("Frame")
 dragGhost.Name = "DragGhost"
@@ -88,7 +135,7 @@ dragGhost.BackgroundColor3 = Color3.fromRGB(40, 44, 50)
 dragGhost.BackgroundTransparency = 0.2
 dragGhost.ZIndex = 50
 dragGhost.Visible = false
-dragGhost.Parent = screenGui
+dragGhost.Parent = root
 
 local ghostCorner = Instance.new("UICorner")
 ghostCorner.CornerRadius = UDim.new(0, 4)
@@ -124,9 +171,9 @@ local hotbarFrame = Instance.new("Frame")
 hotbarFrame.Name = "HotbarFrame"
 hotbarFrame.AnchorPoint = Vector2.new(0.5, 1)
 hotbarFrame.Position = UDim2.new(0.5, 0, 1, -12)
-hotbarFrame.Size = UDim2.new(0, 680, 0, 64)
+hotbarFrame.Size = UDim2.new(0, 640, 0, 64)
 hotbarFrame.BackgroundTransparency = 1
-hotbarFrame.Parent = screenGui
+hotbarFrame.Parent = root
 
 local hotbarLayout = Instance.new("UIListLayout")
 hotbarLayout.FillDirection = Enum.FillDirection.Horizontal
@@ -261,7 +308,7 @@ sideActionFrame.AnchorPoint = Vector2.new(1, 0.5)
 sideActionFrame.Position = UDim2.new(1, -15, 0.5, 0)
 sideActionFrame.Size = UDim2.new(0, 110, 0, 110)
 sideActionFrame.BackgroundTransparency = 1
-sideActionFrame.Parent = screenGui
+sideActionFrame.Parent = root
 
 local sideLayout = Instance.new("UIListLayout")
 sideLayout.FillDirection = Enum.FillDirection.Vertical
@@ -310,7 +357,7 @@ backpackWindow.Size = UDim2.new(0, 560, 0, 310)
 backpackWindow.BackgroundColor3 = Color3.fromRGB(22, 24, 26)
 backpackWindow.BackgroundTransparency = 0.08
 backpackWindow.Visible = false
-backpackWindow.Parent = screenGui
+backpackWindow.Parent = root
 
 local bpCorner = Instance.new("UICorner")
 bpCorner.CornerRadius = UDim.new(0, 6)
@@ -385,10 +432,14 @@ gridLayout.CellPadding = UDim2.new(0, 6, 0, 6)
 gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 gridLayout.Parent = gridScroll
 
-local settingsPanel = Instance.new("Frame")
+local settingsPanel = Instance.new("ScrollingFrame")
 settingsPanel.Size = UDim2.new(1, -20, 1, -66)
 settingsPanel.Position = UDim2.new(0, 10, 0, 56)
 settingsPanel.BackgroundTransparency = 1
+settingsPanel.BorderSizePixel = 0
+settingsPanel.ScrollBarThickness = 4
+settingsPanel.CanvasSize = UDim2.new(0, 0, 0, 0)
+settingsPanel.AutomaticCanvasSize = Enum.AutomaticSize.Y
 settingsPanel.Visible = false
 settingsPanel.Parent = backpackWindow
 
@@ -399,7 +450,7 @@ settingsLayout.Parent = settingsPanel
 
 local function createSettingRow(labelText, btnText)
 	local row = Instance.new("Frame")
-	row.Size = UDim2.new(1, 0, 0, 40)
+	row.Size = UDim2.new(1, -8, 0, 40)
 	row.BackgroundColor3 = Color3.fromRGB(32, 35, 39)
 	row.Parent = settingsPanel
 	local rowCorner = Instance.new("UICorner")
@@ -437,6 +488,11 @@ local slotCountSetBtn = createSettingRow("Hotbar Slot Count (1 - 9):", tostring(
 local dropToggleSetBtn = createSettingRow("Show Drop Button:", "ON")
 local multiToggleSetBtn = createSettingRow("Show Multi-Equip Button:", "ON")
 local equipStyleSetBtn = createSettingRow("Equipped Slot Style:", CONFIG.EquipStyle)
+local lineSizeSetBtn = createSettingRow("Line Size:", "Normal")
+local lineWidthSetBtn = createSettingRow("Line Covers Bottom:", "Inset")
+local uiScaleSetBtn = createSettingRow("UI Size:", tostring(CONFIG.UIScale))
+local instantSetBtn = createSettingRow("Instant Use (equip, use, unequip):", "OFF")
+instantSetBtn.BackgroundColor3 = Color3.fromRGB(48, 51, 55)
 
 -- ==========================================
 -- CORE INVENTORY & DRAG-AND-DROP LOGIC
@@ -541,6 +597,17 @@ local function setStrokeEquipped(stroke)
 	stroke.Transparency = 0
 end
 
+local function styleEquipLine(line)
+	local h = CONFIG.LineBig and 5 or 3
+	if CONFIG.LineFull then
+		line.Size = UDim2.new(1, 0, 0, h)
+		line.Position = UDim2.new(0, 0, 1, -h)
+	else
+		line.Size = UDim2.new(1, -10, 0, h)
+		line.Position = UDim2.new(0, 5, 1, -(h + 2))
+	end
+end
+
 local function renderSlotVisual(btn, tool)
 	local icon = btn:FindFirstChild("Icon")
 	local toolNameLbl = btn:FindFirstChild("ToolName")
@@ -572,7 +639,10 @@ local function renderSlotVisual(btn, tool)
 			if stroke then
 				if useLine then setStrokeIdle(stroke) else setStrokeEquipped(stroke) end
 			end
-			if equipLine then equipLine.Visible = useLine end
+			if equipLine then
+				if useLine then styleEquipLine(equipLine) end
+				equipLine.Visible = useLine
+			end
 			btn.BackgroundColor3 = Color3.fromRGB(50, 53, 58)
 		else
 			if stroke then setStrokeIdle(stroke) end
@@ -811,7 +881,7 @@ UserInputService.InputChanged:Connect(function(input)
 	end
 
 	if DragState.Started then
-		dragGhost.Position = UDim2.fromOffset(currentPos.X, currentPos.Y)
+		dragGhost.Position = UDim2.fromOffset(currentPos.X / uiScale.Scale, currentPos.Y / uiScale.Scale)
 
 		for i = 1, CONFIG.MaxSlots do
 			local btn = slotButtons[i]
@@ -838,6 +908,40 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
+local InstantBusy = {}
+
+local function instantUseTool(tool, humanoid)
+	if InstantBusy[tool] then return end
+	InstantBusy[tool] = true
+
+	task.spawn(function()
+		-- Equip
+		if MultiEquipMode then
+			tool.Parent = getCharacter()
+		else
+			humanoid:EquipTool(tool)
+		end
+		refreshUI()
+		task.wait(0.1) -- let the equip register (client + server)
+
+		-- Activate
+		if isToolEquipped(tool) then
+			tool:Activate()
+			task.wait(0.1)
+			tool:Deactivate()
+		end
+
+		-- Unequip
+		local backpack = player:FindFirstChild("Backpack")
+		if backpack and tool.Parent == getCharacter() then
+			tool.Parent = backpack
+		end
+
+		InstantBusy[tool] = nil
+		refreshUI()
+	end)
+end
+
 local function toggleEquipTool(tool)
 	if not tool then return end
 	local char = getCharacter()
@@ -847,6 +951,9 @@ local function toggleEquipTool(tool)
 
 	if isToolEquipped(tool) then
 		tool.Parent = backpack
+	elseif CONFIG.InstantUse then
+		instantUseTool(tool, humanoid)
+		return
 	else
 		if not MultiEquipMode then
 			humanoid:UnequipTools()
@@ -1013,6 +1120,33 @@ equipStyleSetBtn.MouseButton1Click:Connect(function()
 	CONFIG.EquipStyle = (CONFIG.EquipStyle == "Outline") and "Line" or "Outline"
 	equipStyleSetBtn.Text = CONFIG.EquipStyle
 	refreshUI()
+end)
+
+lineSizeSetBtn.MouseButton1Click:Connect(function()
+	CONFIG.LineBig = not CONFIG.LineBig
+	lineSizeSetBtn.Text = CONFIG.LineBig and "Big" or "Normal"
+	refreshUI()
+end)
+
+lineWidthSetBtn.MouseButton1Click:Connect(function()
+	CONFIG.LineFull = not CONFIG.LineFull
+	lineWidthSetBtn.Text = CONFIG.LineFull and "Full" or "Inset"
+	refreshUI()
+end)
+
+instantSetBtn.MouseButton1Click:Connect(function()
+	CONFIG.InstantUse = not CONFIG.InstantUse
+	instantSetBtn.Text = CONFIG.InstantUse and "ON" or "OFF"
+	instantSetBtn.BackgroundColor3 = CONFIG.InstantUse and Color3.fromRGB(120, 125, 132) or Color3.fromRGB(48, 51, 55)
+end)
+
+local scaleOptions = { "Auto", 0.5, 0.65, 0.8, 1 }
+local scaleIndex = 1
+uiScaleSetBtn.MouseButton1Click:Connect(function()
+	scaleIndex = (scaleIndex % #scaleOptions) + 1
+	CONFIG.UIScale = scaleOptions[scaleIndex]
+	uiScaleSetBtn.Text = tostring(CONFIG.UIScale)
+	applyUIScale()
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
