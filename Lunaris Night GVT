@@ -20,7 +20,7 @@ local MainTab = Window:Tab({
 local Section = MainTab:Section({
     Title = "Combat",
     TextXAlignment = "Left",
-    TextSize = 17,
+    TextSize = 31,
 })
 
 MainTab:Divider()
@@ -107,11 +107,38 @@ tool.Parent = backpack
 })
 
 MainTab:Button({
-    Title = "?",
-    Desc = "?",
+    Title = "Stoic Bomb",
+    Desc = "Use stoic bomb while in base.",
     Locked = false, -- Set true to disable clicking
     Callback = function()
-        print("Button pressed!")
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+-- Create the Tool
+local tool = Instance.new("Tool")
+tool.Name = "Stoic Bomb"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+-- Trigger immediately when selected/pressed in the hotbar
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("*")
+		:WaitForChild("KJ")
+		:WaitForChild("Awakening")
+		:WaitForChild("Stoic Bomb")
+	
+	Event:FireServer()
+	
+	-- Immediately unequip so it acts as a single-tap button
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
     end,
 })
 
