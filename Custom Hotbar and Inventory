@@ -23,13 +23,15 @@ end
 
 disableDefaultBackpack(true)
 
-local warnedBackpack = false
+local reenableCount = 0
 pcall(function()
 	StarterGui.CoreGuiChangedSignal:Connect(function(coreGuiType, enabled)
 		if enabled and (coreGuiType == Enum.CoreGuiType.Backpack or coreGuiType == Enum.CoreGuiType.All) then
-			if not warnedBackpack then
-				warnedBackpack = true
+			reenableCount += 1
+			if reenableCount == 1 then
 				warn("[CustomHotbar] Another script re-enabled the default Roblox backpack. Hiding it again. Search your game for SetCoreGuiEnabled.")
+			elseif reenableCount == 100 then
+				warn("[CustomHotbar] The default backpack was re-enabled 100+ times. A loop in your game is doing this.")
 			end
 			disableDefaultBackpack(true)
 		end
@@ -37,10 +39,20 @@ pcall(function()
 end)
 
 -- Checked every frame (before render and after physics) so it never gets a frame on screen
-RunService:BindToRenderStep("HideDefaultBackpack", Enum.RenderPriority.Last.Value + 1, function()
+local function enforceBackpackOff()
 	disableDefaultBackpack(false)
+	-- again after every other handler on this signal has run (beats a game script that re-enables it)
+	task.defer(disableDefaultBackpack, false)
+end
+
+pcall(function()
+	RunService:BindToRenderStep("HideDefaultBackpack", 2000000000, enforceBackpackOff)
 end)
-RunService.Heartbeat:Connect(function() disableDefaultBackpack(false) end)
+for _, signalName in ipairs({ "RenderStepped", "PreRender", "Heartbeat", "Stepped", "PreSimulation", "PostSimulation", "PreAnimation" }) do
+	pcall(function()
+		RunService[signalName]:Connect(enforceBackpackOff)
+	end)
+end
 
 -- Hard re-apply a few times a second in case Get lies
 task.spawn(function()
@@ -74,6 +86,7 @@ local CONFIG = {
 	InstantUse = false,     -- equip -> activate -> unequip in one press
 	InstantSpeed = "Instant", -- "Instant" (1 frame), "Fast", "Safe"
 	ScaleBySlots = true,    -- fewer slots = bigger slots
+	HideOtherHotbars = true,  -- hide hotbars the GAME ships itself (found by tool names)
 }
 
 local SavedOrder = {}       -- [ToolName] = SlotNumber
@@ -83,6 +96,7 @@ local MultiEquipMode = false
 local CurrentFilter = "Newest"
 local SearchQuery = ""
 local OrderCounter = 0
+local instantActive = 0     -- >0 while Instant Use is running (UI refresh is paused)
 
 local DragState = {
 	Active = false,
@@ -514,6 +528,28 @@ local instantSetBtn = createSettingRow("Instant Use (equip, use, unequip):", "OF
 instantSetBtn.BackgroundColor3 = Color3.fromRGB(48, 51, 55)
 local instantSpeedSetBtn = createSettingRow("Instant Use Speed:", CONFIG.InstantSpeed)
 local scaleSlotsSetBtn = createSettingRow("Scale Hotbar By Slots:", "ON")
+local hideOtherSetBtn = createSettingRow("Hide Other Hotbars:", "ON")
+local hideStatusLabel = Instance.new("TextLabel")
+hideStatusLabel.Size = UDim2.new(1, -8, 0, 32)
+hideStatusLabel.BackgroundTransparency = 1
+hideStatusLabel.Text = "Hotbar hider: scanning..."
+hideStatusLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+hideStatusLabel.Font = Enum.Font.Gotham
+hideStatusLabel.TextSize = 12
+hideStatusLabel.TextWrapped = true
+hideStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+hideStatusLabel.Parent = settingsPanel
+
+local backpackStatusLabel = Instance.new("TextLabel")
+backpackStatusLabel.Size = UDim2.new(1, -8, 0, 32)
+backpackStatusLabel.BackgroundTransparency = 1
+backpackStatusLabel.Text = "Roblox hotbar flag: checking..."
+backpackStatusLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+backpackStatusLabel.Font = Enum.Font.Gotham
+backpackStatusLabel.TextSize = 12
+backpackStatusLabel.TextWrapped = true
+backpackStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+backpackStatusLabel.Parent = settingsPanel
 
 local function applyHotbarSize()
 	local k = 1
@@ -725,6 +761,8 @@ end
 local function refreshUI()
 	disableDefaultBackpack(true)
 	task.defer(disableDefaultBackpack, true)
+
+	if instantActive > 0 then return end
 
 	for i = 1, 9 do
 		local btn = slotButtons[i]
@@ -949,13 +987,155 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
+-- Hide hotbars the GAME ships itself. (Roblox's own hotbar lives in CoreGui and obeys the disable above;
+-- a hotbar that stays visible is usually a game-made GUI inside PlayerGui, found here by tool names.)
+local hiddenTargets = {} -- [GuiObject] = true
+
+local function commonAncestor(a, b)
+	local seen = {}
+	local x = a
+	while x do
+		seen[x] = true
+		x = x.Parent
+	end
+	local y = b
+	while y do
+		if seen[y] then return y end
+		y = y.Parent
+	end
+	return nil
+end
+
+local function hideTarget(obj, reason)
+	if obj:IsA("GuiObject") and not hiddenTargets[obj] then
+		hiddenTargets[obj] = true
+		warn("[CustomHotbar] Hiding other hotbar element: " .. obj:GetFullName() .. " (" .. reason .. ")")
+	end
+end
+
+local function scanOtherHotbars()
+	local names = {}
+	local anyTool = false
+	for _, tool in ipairs(getAllTools()) do
+		names[string.lower(tool.Name)] = true
+		anyTool = true
+	end
+	if not anyTool then return end
+
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
+
+	for _, gui in ipairs(playerGui:GetChildren()) do
+		if gui:IsA("ScreenGui") and gui ~= screenGui then
+			local matches = {}
+			for _, d in ipairs(gui:GetDescendants()) do
+				if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text ~= ""
+					and names[string.lower(d.Text)] and d.AbsolutePosition.Y > vp.Y * 0.55 then
+					table.insert(matches, d)
+				end
+			end
+
+			if #matches >= 2 then
+				-- Find the container that holds all the matching slots
+				local container = matches[1]
+				for i = 2, #matches do
+					container = container and commonAncestor(container, matches[i])
+				end
+
+				local usable = container and container:IsA("GuiObject")
+					and container.AbsoluteSize.Y < vp.Y * 0.35
+					and container.AbsoluteSize.X < vp.X * 0.95
+
+				if usable then
+					hideTarget(container, "hotbar container")
+				else
+					-- Too big or not a clean container: hide just the slots
+					for _, m in ipairs(matches) do
+						local slot = m.Parent
+						if slot and slot:IsA("GuiObject") and slot ~= gui then
+							hideTarget(slot, "hotbar slot")
+						else
+							hideTarget(m, "hotbar label")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+local function updateHideStatus()
+	if not hideStatusLabel then return end
+	if not CONFIG.HideOtherHotbars then
+		hideStatusLabel.Text = "Hotbar hider: off"
+		return
+	end
+	local list = {}
+	for obj in pairs(hiddenTargets) do
+		table.insert(list, obj.Name)
+	end
+	if #list > 0 then
+		hideStatusLabel.Text = "Hotbar hider: hiding " .. table.concat(list, ", ")
+	else
+		hideStatusLabel.Text = "Hotbar hider: no game-made hotbar found in PlayerGui (the one you see may be Roblox's own)"
+	end
+end
+
+local function restoreHiddenGuis()
+	for obj in pairs(hiddenTargets) do
+		if obj.Parent then
+			obj.Visible = true
+		end
+		hiddenTargets[obj] = nil
+	end
+	updateHideStatus()
+end
+
+-- Keep hidden targets hidden every frame (the game may keep re-showing them)
+RunService.Heartbeat:Connect(function()
+	if not CONFIG.HideOtherHotbars then return end
+	for obj in pairs(hiddenTargets) do
+		if obj.Parent then
+			if obj.Visible then obj.Visible = false end
+		else
+			hiddenTargets[obj] = nil
+		end
+	end
+end)
+
+local function updateBackpackStatus()
+	local ok, enabled = pcall(function()
+		return StarterGui:GetCoreGuiEnabled(Enum.CoreGuiType.Backpack)
+	end)
+	local state = "unknown"
+	if ok then
+		state = enabled and "ON (hiding failed)" or "OFF"
+	end
+	backpackStatusLabel.Text = "Roblox hotbar flag: " .. state .. " | turned back on by the game: " .. reenableCount .. "x"
+end
+
+task.spawn(function()
+	while true do
+		if CONFIG.HideOtherHotbars then
+			pcall(scanOtherHotbars)
+		end
+		updateHideStatus()
+		updateBackpackStatus()
+		task.wait(0.5)
+	end
+end)
+
+-- Instant Use
 local InstantBusy = {}
-local INSTANT_DELAYS = { Instant = 0, Fast = 0.04, Safe = 0.1 }
+-- Zero = no waiting at all, Instant = 1 frame, Fast/Safe = small fixed delay
+local INSTANT_DELAYS = { Zero = -1, Instant = 0, Fast = 0.04, Safe = 0.1 }
 
 local function instantStep()
 	local d = INSTANT_DELAYS[CONFIG.InstantSpeed] or 0
-	if d <= 0 then
-		RunService.Heartbeat:Wait() -- a single frame
+	if d < 0 then
+		return
+	elseif d == 0 then
+		RunService.Heartbeat:Wait()
 	else
 		task.wait(d)
 	end
@@ -964,30 +1144,39 @@ end
 local function instantUseTool(tool, humanoid)
 	if InstantBusy[tool] then return end
 	InstantBusy[tool] = true
+	instantActive += 1 -- pauses UI refresh so the equipped indicator never flashes
 
 	task.spawn(function()
-		-- Equip
-		if MultiEquipMode then
-			tool.Parent = getCharacter()
-		else
-			humanoid:EquipTool(tool)
-		end
-		instantStep()
-
-		-- Activate
-		if isToolEquipped(tool) then
-			tool:Activate()
+		local ok, err = pcall(function()
+			-- Equip
+			if MultiEquipMode then
+				tool.Parent = getCharacter()
+			else
+				humanoid:EquipTool(tool)
+			end
 			instantStep()
-			tool:Deactivate()
-		end
 
-		-- Unequip
-		local backpack = player:FindFirstChild("Backpack")
-		if backpack and tool.Parent == getCharacter() then
-			tool.Parent = backpack
-		end
+			-- Activate
+			if isToolEquipped(tool) then
+				tool:Activate()
+				if (INSTANT_DELAYS[CONFIG.InstantSpeed] or 0) > 0 then
+					instantStep()
+				end
+				tool:Deactivate()
+			end
 
+			-- Unequip
+			local backpack = player:FindFirstChild("Backpack")
+			if backpack and tool.Parent == getCharacter() then
+				tool.Parent = backpack
+			end
+		end)
+
+		instantActive -= 1
 		InstantBusy[tool] = nil
+		if not ok then
+			warn("[CustomHotbar] Instant use error: " .. tostring(err))
+		end
 		refreshUI()
 	end)
 end
@@ -1191,7 +1380,17 @@ instantSetBtn.MouseButton1Click:Connect(function()
 	instantSetBtn.BackgroundColor3 = CONFIG.InstantUse and Color3.fromRGB(120, 125, 132) or Color3.fromRGB(48, 51, 55)
 end)
 
-local speedOptions = { "Instant", "Fast", "Safe" }
+hideOtherSetBtn.MouseButton1Click:Connect(function()
+	CONFIG.HideOtherHotbars = not CONFIG.HideOtherHotbars
+	hideOtherSetBtn.Text = CONFIG.HideOtherHotbars and "ON" or "OFF"
+	hideOtherSetBtn.BackgroundColor3 = CONFIG.HideOtherHotbars and Color3.fromRGB(120, 125, 132) or Color3.fromRGB(48, 51, 55)
+	if not CONFIG.HideOtherHotbars then
+		restoreHiddenGuis()
+	end
+	updateHideStatus()
+end)
+
+local speedOptions = { "Zero", "Instant", "Fast", "Safe" }
 instantSpeedSetBtn.MouseButton1Click:Connect(function()
 	local idx = table.find(speedOptions, CONFIG.InstantSpeed) or 1
 	CONFIG.InstantSpeed = speedOptions[(idx % #speedOptions) + 1]
