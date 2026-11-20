@@ -5,12 +5,35 @@ local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 
+local ACCENT = Color3.fromRGB(0, 162, 255) -- Roblox equip blue
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- Disable default Roblox Backpack
+-- Keep the default Roblox Backpack disabled (re-disables if the game turns it back on)
+local function disableDefaultBackpack()
+	pcall(function()
+		if StarterGui:GetCoreGuiEnabled(Enum.CoreGuiType.Backpack) then
+			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+		end
+	end)
+end
+
+disableDefaultBackpack()
+
 pcall(function()
-	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+	StarterGui.CoreGuiChangedSignal:Connect(function(coreGuiType, enabled)
+		if enabled and (coreGuiType == Enum.CoreGuiType.Backpack or coreGuiType == Enum.CoreGuiType.All) then
+			disableDefaultBackpack()
+		end
+	end)
+end)
+
+task.spawn(function()
+	while true do
+		disableDefaultBackpack()
+		task.wait(0.5)
+	end
 end)
 
 -- ==========================================
@@ -20,6 +43,7 @@ local CONFIG = {
 	MaxSlots = 9,
 	ShowDropBtn = true,
 	ShowMultiBtn = true,
+	EquipStyle = "Outline", -- "Outline" or "Line"
 }
 
 local SavedOrder = {}       -- [ToolName] = SlotNumber
@@ -67,11 +91,11 @@ dragGhost.Visible = false
 dragGhost.Parent = screenGui
 
 local ghostCorner = Instance.new("UICorner")
-ghostCorner.CornerRadius = UDim.new(0, 12)
+ghostCorner.CornerRadius = UDim.new(0, 4)
 ghostCorner.Parent = dragGhost
 
 local ghostStroke = Instance.new("UIStroke")
-ghostStroke.Color = Color3.fromRGB(255, 255, 255)
+ghostStroke.Color = ACCENT
 ghostStroke.Thickness = 2
 ghostStroke.Parent = dragGhost
 
@@ -124,13 +148,13 @@ local function createSlotButton(name, parent, isBackpackBtn)
 	btn.Parent = parent
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 12)
+	corner.CornerRadius = UDim.new(0, 4)
 	corner.Parent = btn
 
 	local stroke = Instance.new("UIStroke")
 	stroke.Name = "SelectionStroke"
-	stroke.Color = Color3.fromRGB(80, 84, 90)
-	stroke.Thickness = 1.5
+	stroke.Color = Color3.fromRGB(70, 74, 80)
+	stroke.Thickness = 1
 	stroke.Transparency = 0.3
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Parent = btn
@@ -175,8 +199,10 @@ local function createSlotButton(name, parent, isBackpackBtn)
 		numLabel.Size = UDim2.new(0, 18, 0, 18)
 		numLabel.Position = UDim2.new(0, 4, 0, 2)
 		numLabel.BackgroundTransparency = 1
-		numLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-		numLabel.TextSize = 12
+		numLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		numLabel.TextSize = 11
+		numLabel.ZIndex = 3
+		numLabel.TextStrokeTransparency = 0.6
 		numLabel.Font = Enum.Font.GothamBold
 		numLabel.TextXAlignment = Enum.TextXAlignment.Left
 		numLabel.Parent = btn
@@ -189,9 +215,22 @@ local function createSlotButton(name, parent, isBackpackBtn)
 		dropMark.Text = "X"
 		dropMark.TextColor3 = Color3.fromRGB(235, 235, 235)
 		dropMark.TextSize = 12
+		dropMark.ZIndex = 3
 		dropMark.Font = Enum.Font.GothamBlack
 		dropMark.Visible = false
 		dropMark.Parent = btn
+	end
+
+	if not isBackpackBtn then
+		local equipLine = Instance.new("Frame")
+		equipLine.Name = "EquipLine"
+		equipLine.Size = UDim2.new(1, -10, 0, 3)
+		equipLine.Position = UDim2.new(0, 5, 1, -5)
+		equipLine.BackgroundColor3 = ACCENT
+		equipLine.BorderSizePixel = 0
+		equipLine.ZIndex = 3
+		equipLine.Visible = false
+		equipLine.Parent = btn
 	end
 
 	btn.MouseEnter:Connect(function()
@@ -246,7 +285,7 @@ local function createSideButton(name, text, order)
 	btn.Parent = sideActionFrame
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 12)
+	corner.CornerRadius = UDim.new(0, 4)
 	corner.Parent = btn
 
 	local stroke = Instance.new("UIStroke")
@@ -274,7 +313,7 @@ backpackWindow.Visible = false
 backpackWindow.Parent = screenGui
 
 local bpCorner = Instance.new("UICorner")
-bpCorner.CornerRadius = UDim.new(0, 16)
+bpCorner.CornerRadius = UDim.new(0, 6)
 bpCorner.Parent = backpackWindow
 
 local bpStroke = Instance.new("UIStroke")
@@ -301,7 +340,7 @@ searchBox.TextSize = 14
 searchBox.ClearTextOnFocus = false
 searchBox.Parent = topBar
 local sbCorner = Instance.new("UICorner")
-sbCorner.CornerRadius = UDim.new(0, 10)
+sbCorner.CornerRadius = UDim.new(0, 4)
 sbCorner.Parent = searchBox
 
 local filterBtn = Instance.new("TextButton")
@@ -314,7 +353,7 @@ filterBtn.Font = Enum.Font.GothamBold
 filterBtn.TextSize = 13
 filterBtn.Parent = topBar
 local fbCorner = Instance.new("UICorner")
-fbCorner.CornerRadius = UDim.new(0, 10)
+fbCorner.CornerRadius = UDim.new(0, 4)
 fbCorner.Parent = filterBtn
 
 local settingsBtn = Instance.new("TextButton")
@@ -327,7 +366,7 @@ settingsBtn.Font = Enum.Font.GothamBold
 settingsBtn.TextSize = 18
 settingsBtn.Parent = topBar
 local sCorner = Instance.new("UICorner")
-sCorner.CornerRadius = UDim.new(0, 10)
+sCorner.CornerRadius = UDim.new(0, 4)
 sCorner.Parent = settingsBtn
 
 local gridScroll = Instance.new("ScrollingFrame")
@@ -364,7 +403,7 @@ local function createSettingRow(labelText, btnText)
 	row.BackgroundColor3 = Color3.fromRGB(32, 35, 39)
 	row.Parent = settingsPanel
 	local rowCorner = Instance.new("UICorner")
-	rowCorner.CornerRadius = UDim.new(0, 10)
+	rowCorner.CornerRadius = UDim.new(0, 4)
 	rowCorner.Parent = row
 
 	local lbl = Instance.new("TextLabel")
@@ -379,7 +418,7 @@ local function createSettingRow(labelText, btnText)
 	lbl.Parent = row
 
 	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, 70, 0, 28)
+	btn.Size = UDim2.new(0, 80, 0, 28)
 	btn.AnchorPoint = Vector2.new(1, 0.5)
 	btn.Position = UDim2.new(1, -8, 0.5, 0)
 	btn.BackgroundColor3 = Color3.fromRGB(120, 125, 132)
@@ -389,7 +428,7 @@ local function createSettingRow(labelText, btnText)
 	btn.TextSize = 14
 	btn.Parent = row
 	local rCorner = Instance.new("UICorner")
-	rCorner.CornerRadius = UDim.new(0, 10)
+	rCorner.CornerRadius = UDim.new(0, 4)
 	rCorner.Parent = btn
 	return btn
 end
@@ -397,6 +436,7 @@ end
 local slotCountSetBtn = createSettingRow("Hotbar Slot Count (1 - 9):", tostring(CONFIG.MaxSlots))
 local dropToggleSetBtn = createSettingRow("Show Drop Button:", "ON")
 local multiToggleSetBtn = createSettingRow("Show Multi-Equip Button:", "ON")
+local equipStyleSetBtn = createSettingRow("Equipped Slot Style:", CONFIG.EquipStyle)
 
 -- ==========================================
 -- CORE INVENTORY & DRAG-AND-DROP LOGIC
@@ -490,14 +530,14 @@ local function updateSideButtons()
 end
 
 local function setStrokeIdle(stroke)
-	stroke.Color = Color3.fromRGB(80, 84, 90)
-	stroke.Thickness = 1.5
+	stroke.Color = Color3.fromRGB(70, 74, 80)
+	stroke.Thickness = 1
 	stroke.Transparency = 0.3
 end
 
 local function setStrokeEquipped(stroke)
-	stroke.Color = Color3.fromRGB(255, 255, 255)
-	stroke.Thickness = 2.5
+	stroke.Color = ACCENT
+	stroke.Thickness = 1.5
 	stroke.Transparency = 0
 end
 
@@ -506,6 +546,7 @@ local function renderSlotVisual(btn, tool)
 	local toolNameLbl = btn:FindFirstChild("ToolName")
 	local dropMark = btn:FindFirstChild("DroppableMark")
 	local stroke = btn:FindFirstChild("SelectionStroke")
+	local equipLine = btn:FindFirstChild("EquipLine")
 
 	if tool then
 		if tool.TextureId ~= "" then
@@ -527,10 +568,15 @@ local function renderSlotVisual(btn, tool)
 		end
 
 		if isToolEquipped(tool) then
-			if stroke then setStrokeEquipped(stroke) end
+			local useLine = CONFIG.EquipStyle == "Line"
+			if stroke then
+				if useLine then setStrokeIdle(stroke) else setStrokeEquipped(stroke) end
+			end
+			if equipLine then equipLine.Visible = useLine end
 			btn.BackgroundColor3 = Color3.fromRGB(50, 53, 58)
 		else
 			if stroke then setStrokeIdle(stroke) end
+			if equipLine then equipLine.Visible = false end
 			btn.BackgroundColor3 = Color3.fromRGB(25, 27, 29)
 		end
 	else
@@ -538,6 +584,7 @@ local function renderSlotVisual(btn, tool)
 		if toolNameLbl then toolNameLbl.Visible = false end
 		if dropMark then dropMark.Visible = false end
 		if stroke then setStrokeIdle(stroke) end
+		if equipLine then equipLine.Visible = false end
 		btn.BackgroundColor3 = Color3.fromRGB(25, 27, 29)
 	end
 end
@@ -771,7 +818,7 @@ UserInputService.InputChanged:Connect(function(input)
 			local stroke = btn:FindFirstChild("SelectionStroke")
 			if stroke then
 				if isPointInGui(currentPos, btn) then
-					stroke.Color = Color3.fromRGB(255, 255, 255)
+					stroke.Color = ACCENT
 					stroke.Transparency = 0
 				elseif not isToolEquipped(HotbarSlots[i]) then
 					setStrokeIdle(stroke)
@@ -960,6 +1007,12 @@ multiToggleSetBtn.MouseButton1Click:Connect(function()
 	multiToggleSetBtn.Text = CONFIG.ShowMultiBtn and "ON" or "OFF"
 	multiToggleSetBtn.BackgroundColor3 = CONFIG.ShowMultiBtn and Color3.fromRGB(120, 125, 132) or Color3.fromRGB(48, 51, 55)
 	updateSideButtons()
+end)
+
+equipStyleSetBtn.MouseButton1Click:Connect(function()
+	CONFIG.EquipStyle = (CONFIG.EquipStyle == "Outline") and "Line" or "Outline"
+	equipStyleSetBtn.Text = CONFIG.EquipStyle
+	refreshUI()
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
