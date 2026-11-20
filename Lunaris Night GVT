@@ -3,7 +3,7 @@ local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/rel
 local Window = WindUI:CreateWindow({
     Title = "Lunaris Night",
     Author = "Seroz",
-    Folder = "Lunaris Night Configs",
+    Folder = "Lunaris Night",
     Size = UDim2.fromOffset(580, 460),
     Icon = "rbxassetid://138234690869720",
     Background = "rbxassetid://106387220207968",
@@ -18,7 +18,7 @@ local MainTab = Window:Tab({
 })
 
 local Section = MainTab:Section({
-    Title = "?",
+    Title = "Combat",
     TextXAlignment = "Left",
     TextSize = 17,
 })
@@ -26,46 +26,82 @@ local Section = MainTab:Section({
 MainTab:Divider()
 MainTab:Space()
 
-MainTab:Button({
-    Title = "?",
-    Desc = "?",
-    Locked = true, -- Set true to disable clicking
-    Callback = function()
-        print("?")
-    end,
-})
-
-local MyToggle = MainTab:Toggle({
-    Title = "Auto Domain Clash",
-    Desc = "Experimental",
-    Value = false, -- Starting state
-    Callback = function(state)
-        print("Toggle is now:", state)
-    end,
-})
--- Optional: MyToggle:Set(true) to change it via code
-
 local InfoPara = MainTab:Paragraph({
-    Title = "Discord",
-    Desc = "Coming Soon.",
+    Title = "Abilities",
+    Desc = "Character specific, only works for the character that the ability originates from.",
     Image = "info",
     ImageSize = 20,
-    Buttons = {
-        {
-            Title = "Copy Link",
-            Icon = "copy",
-            Callback = function()
-                setclipboard("https://example.com")
-            end,
-        }
-    }
-})
+    
 -- Optional: InfoPara:SetDesc("Updated text!")
 
-MainTab:Code({
-    Title = "Example Snippet",
-    Code = [[print("Hello from WindUI!")]],
+MainTab:Button({
+    Title = "0.2 Domain",
+    Desc = "Use 0.2 Domain after using red chant.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+-- Create the Tool
+local tool = Instance.new("Tool")
+tool.Name = "0.2 Domain"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+-- Trigger immediately when selected/pressed in the hotbar
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Strongest Of Today")
+		:WaitForChild("Awakening")
+		:WaitForChild("0.2 Domain")
+	
+	Event:FireServer()
+	
+	-- Immediately unequip so it acts as a single-tap button
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
+    end,
 })
+
+MainTab:Button({
+    Title = "20-20-20 Dropkick",
+    Desc = "Use dropkick while in base.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+-- Create the Tool
+local tool = Instance.new("Tool")
+tool.Name = "20-20-20 Dropkick"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+-- Connect the activation event (triggers when clicking while holding the tool)
+tool.Activated:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("*")
+		:WaitForChild("KJ")
+		:WaitForChild("Awakening")
+		:WaitForChild("20-20-20 Dropkick")
+	
+	Event:FireServer()
+end)
+
+-- Put the tool into the player's backpack
+tool.Parent = backpack
+    end,
+})
+
 
 WindUI:Notify({
     Title = "Loaded",
