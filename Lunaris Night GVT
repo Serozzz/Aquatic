@@ -87,8 +87,8 @@ tool.Name = "20-20-20 Dropkick"
 tool.RequiresHandle = false
 tool.CanBeDropped = false
 
--- Connect the activation event (triggers when clicking while holding the tool)
-tool.Activated:Connect(function()
+-- Trigger immediately when selected/pressed in the hotbar
+tool.Equipped:Connect(function()
 	local Event = ReplicatedStorage:WaitForChild("SkillCast")
 		:WaitForChild("*")
 		:WaitForChild("KJ")
@@ -96,9 +96,12 @@ tool.Activated:Connect(function()
 		:WaitForChild("20-20-20 Dropkick")
 	
 	Event:FireServer()
+	
+	-- Immediately unequip so it acts as a single-tap button
+	task.wait()
+	tool.Parent = backpack
 end)
 
--- Put the tool into the player's backpack
 tool.Parent = backpack
     end,
 })
