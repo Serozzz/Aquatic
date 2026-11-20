@@ -1,0 +1,33 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+local moves = {
+	{ toolName = "Sparks Of Black", eventName = "Sparks Of Black" },
+	{ toolName = "Crushing Rushdown", eventName = "Crushing Rushdown" },
+	{ toolName = "Lethal Combo", eventName = "Lethal Combo" },
+	{ toolName = "Reversal Grab", eventName = "Reversal Grab" },
+}
+
+for _, move in ipairs(moves) do
+	local tool = Instance.new("Tool")
+	tool.Name = move.toolName
+	tool.RequiresHandle = false
+	tool.CanBeDropped = false
+
+	tool.Equipped:Connect(function()
+		local Event = ReplicatedStorage:WaitForChild("SkillCast")
+			:WaitForChild("Strongest Of Today")
+			:WaitForChild("Base")
+			:WaitForChild(move.eventName)
+
+		Event:FireServer()
+
+		task.wait()
+		tool.Parent = backpack
+	end)
+
+	tool.Parent = backpack
+end
