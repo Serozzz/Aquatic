@@ -23,16 +23,23 @@ end
 
 disableDefaultBackpack(true)
 
+local warnedBackpack = false
 pcall(function()
 	StarterGui.CoreGuiChangedSignal:Connect(function(coreGuiType, enabled)
 		if enabled and (coreGuiType == Enum.CoreGuiType.Backpack or coreGuiType == Enum.CoreGuiType.All) then
+			if not warnedBackpack then
+				warnedBackpack = true
+				warn("[CustomHotbar] Another script re-enabled the default Roblox backpack. Hiding it again. Search your game for SetCoreGuiEnabled.")
+			end
 			disableDefaultBackpack(true)
 		end
 	end)
 end)
 
 -- Checked every frame (before render and after physics) so it never gets a frame on screen
-RunService.RenderStepped:Connect(function() disableDefaultBackpack(false) end)
+RunService:BindToRenderStep("HideDefaultBackpack", Enum.RenderPriority.Last.Value + 1, function()
+	disableDefaultBackpack(false)
+end)
 RunService.Heartbeat:Connect(function() disableDefaultBackpack(false) end)
 
 -- Hard re-apply a few times a second in case Get lies
@@ -43,11 +50,21 @@ task.spawn(function()
 	end
 end)
 
+-- After every respawn, force it off every frame for a couple of seconds
+player.CharacterAdded:Connect(function()
+	task.spawn(function()
+		for _ = 1, 120 do
+			disableDefaultBackpack(true)
+			RunService.Heartbeat:Wait()
+		end
+	end)
+end)
+
 -- ==========================================
 -- CONFIGURATION & STATE
 -- ==========================================
 local CONFIG = {
-	MaxSlots = 9,
+	MaxSlots = 5,
 	ShowDropBtn = true,
 	ShowMultiBtn = true,
 	EquipStyle = "Outline", -- "Outline" or "Line"
@@ -55,6 +72,8 @@ local CONFIG = {
 	LineFull = false,       -- line covers the whole bottom edge
 	UIScale = "Auto",       -- "Auto" or a number (0.5 - 1)
 	InstantUse = false,     -- equip -> activate -> unequip in one press
+	InstantSpeed = "Instant", -- "Instant" (1 frame), "Fast", "Safe"
+	ScaleBySlots = true,    -- fewer slots = bigger slots
 }
 
 local SavedOrder = {}       -- [ToolName] = SlotNumber
@@ -107,7 +126,7 @@ local function computeUIScale()
 	end
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
-	return math.clamp(math.min(vp.X / 1000, vp.Y / 520), 0.55, 1)
+	return math.clamp(math.min(vp.X / 900, vp.Y / 450), 0.65, 1)
 end
 
 local function applyUIScale()
@@ -493,6 +512,25 @@ local lineWidthSetBtn = createSettingRow("Line Covers Bottom:", "Inset")
 local uiScaleSetBtn = createSettingRow("UI Size:", tostring(CONFIG.UIScale))
 local instantSetBtn = createSettingRow("Instant Use (equip, use, unequip):", "OFF")
 instantSetBtn.BackgroundColor3 = Color3.fromRGB(48, 51, 55)
+local instantSpeedSetBtn = createSettingRow("Instant Use Speed:", CONFIG.InstantSpeed)
+local scaleSlotsSetBtn = createSettingRow("Scale Hotbar By Slots:", "ON")
+
+local function applyHotbarSize()
+	local k = 1
+	if CONFIG.ScaleBySlots then
+		k = 1 + (9 - CONFIG.MaxSlots) * 0.06 -- 9 slots = 1x, 5 slots = ~1.24x, 1 slot = ~1.48x
+	end
+	local size = math.floor(58 * k + 0.5)
+
+	for i = 1, 9 do
+		slotButtons[i].Size = UDim2.new(0, size, 0, size)
+	end
+	backpackSlotBtn.Size = UDim2.new(0, size, 0, size)
+
+	hotbarFrame.Size = UDim2.new(0, (CONFIG.MaxSlots + 1) * (size + 6) + 6, 0, size + 6)
+	backpackWindow.Position = UDim2.new(0.5, 0, 1, -(size + 28))
+end
+applyHotbarSize()
 
 -- ==========================================
 -- CORE INVENTORY & DRAG-AND-DROP LOGIC
@@ -685,6 +723,9 @@ local function beginPotentialDrag(input, tool, sourceType, sourceSlot)
 end
 
 local function refreshUI()
+	disableDefaultBackpack(true)
+	task.defer(disableDefaultBackpack, true)
+
 	for i = 1, 9 do
 		local btn = slotButtons[i]
 		if i <= CONFIG.MaxSlots then
@@ -909,6 +950,16 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 local InstantBusy = {}
+local INSTANT_DELAYS = { Instant = 0, Fast = 0.04, Safe = 0.1 }
+
+local function instantStep()
+	local d = INSTANT_DELAYS[CONFIG.InstantSpeed] or 0
+	if d <= 0 then
+		RunService.Heartbeat:Wait() -- a single frame
+	else
+		task.wait(d)
+	end
+end
 
 local function instantUseTool(tool, humanoid)
 	if InstantBusy[tool] then return end
@@ -921,13 +972,12 @@ local function instantUseTool(tool, humanoid)
 		else
 			humanoid:EquipTool(tool)
 		end
-		refreshUI()
-		task.wait(0.1) -- let the equip register (client + server)
+		instantStep()
 
 		-- Activate
 		if isToolEquipped(tool) then
 			tool:Activate()
-			task.wait(0.1)
+			instantStep()
 			tool:Deactivate()
 		end
 
@@ -1096,6 +1146,7 @@ end)
 slotCountSetBtn.MouseButton1Click:Connect(function()
 	CONFIG.MaxSlots = (CONFIG.MaxSlots % 9) + 1
 	slotCountSetBtn.Text = tostring(CONFIG.MaxSlots)
+	applyHotbarSize()
 	for i = CONFIG.MaxSlots + 1, 9 do
 		HotbarSlots[i] = nil
 	end
@@ -1140,7 +1191,21 @@ instantSetBtn.MouseButton1Click:Connect(function()
 	instantSetBtn.BackgroundColor3 = CONFIG.InstantUse and Color3.fromRGB(120, 125, 132) or Color3.fromRGB(48, 51, 55)
 end)
 
-local scaleOptions = { "Auto", 0.5, 0.65, 0.8, 1 }
+local speedOptions = { "Instant", "Fast", "Safe" }
+instantSpeedSetBtn.MouseButton1Click:Connect(function()
+	local idx = table.find(speedOptions, CONFIG.InstantSpeed) or 1
+	CONFIG.InstantSpeed = speedOptions[(idx % #speedOptions) + 1]
+	instantSpeedSetBtn.Text = CONFIG.InstantSpeed
+end)
+
+scaleSlotsSetBtn.MouseButton1Click:Connect(function()
+	CONFIG.ScaleBySlots = not CONFIG.ScaleBySlots
+	scaleSlotsSetBtn.Text = CONFIG.ScaleBySlots and "ON" or "OFF"
+	scaleSlotsSetBtn.BackgroundColor3 = CONFIG.ScaleBySlots and Color3.fromRGB(120, 125, 132) or Color3.fromRGB(48, 51, 55)
+	applyHotbarSize()
+end)
+
+local scaleOptions = { "Auto", 0.6, 0.7, 0.8, 0.9, 1 }
 local scaleIndex = 1
 uiScaleSetBtn.MouseButton1Click:Connect(function()
 	scaleIndex = (scaleIndex % #scaleOptions) + 1
