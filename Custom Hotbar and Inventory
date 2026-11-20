@@ -1,0 +1,894 @@
+-- Place this LocalScript inside StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Disable default Roblox Backpack
+pcall(function()
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+end)
+
+-- ==========================================
+-- CONFIGURATION & STATE
+-- ==========================================
+local CONFIG = {
+	MaxSlots = 9,           -- Default 9 hotbar slots (adjustable 1-9 in settings)
+	ShowDropBtn = true,     -- Toggle for middle-right Drop button
+	ShowMultiBtn = true,    -- Toggle for middle-right Multi-Equip button
+}
+
+local SavedOrder = {}       -- [ToolName] = SlotNumber (persists across respawns)
+local ToolData = {}         -- [ToolInstance] = { AddedOrder = number }
+local HotbarSlots = {}      -- [1..9] = ToolInstance or nil
+local MultiEquipMode = false
+local CurrentFilter = "Newest" -- "Newest", "Oldest", "Droppable", "Undroppable"
+local SearchQuery = ""
+local OrderCounter = 0
+
+-- Drag & Drop State
+local DragState = {
+	Active = false,
+	Started = false,
+	Tool = nil,
+	SourceType = nil,       -- "Hotbar" or "Backpack"
+	SourceSlot = nil,       -- 1..9 if SourceType == "Hotbar"
+	StartPos = Vector2.zero,
+	InputObj = nil,
+}
+
+local KeyCodes = {
+	Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three,
+	Enum.KeyCode.Four, Enum.KeyCode.Five, Enum.KeyCode.Six,
+	Enum.KeyCode.Seven, Enum.KeyCode.Eight, Enum.KeyCode.Nine
+}
+
+-- ==========================================
+-- UI CREATION
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CustomHotbarSystem"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+-- Ghost Icon shown while dragging
+local dragGhost = Instance.new("Frame")
+dragGhost.Name = "DragGhost"
+dragGhost.AnchorPoint = Vector2.new(0.5, 0.5)
+dragGhost.Size = UDim2.new(0, 56, 0, 56)
+dragGhost.BackgroundColor3 = Color3.fromRGB(40, 44, 50)
+dragGhost.BackgroundTransparency = 0.2
+dragGhost.ZIndex = 50
+dragGhost.Visible = false
+dragGhost.Parent = screenGui
+Instance.new("UICorner", dragGhost).CornerRadius = UDim.new(0, 8)
+
+local ghostStroke = Instance.new("UIStroke")
+ghostStroke.Color = Color3.fromRGB(120, 200, 255)
+ghostStroke.Thickness = 2
+ghostStroke.Parent = dragGhost
+
+local ghostIcon = Instance.new("ImageLabel")
+ghostIcon.Name = "Icon"
+ghostIcon.Size = UDim2.new(0.7, 0, 0.7, 0)
+ghostIcon.Position = UDim2.new(0.15, 0, 0.15, 0)
+ghostIcon.BackgroundTransparency = 1
+ghostIcon.ScaleType = Enum.ScaleType.Fit
+ghostIcon.ZIndex = 51
+ghostIcon.Parent = dragGhost
+
+local ghostLabel = Instance.new("TextLabel")
+ghostLabel.Name = "ToolName"
+ghostLabel.Size = UDim2.new(0.88, 0, 0.88, 0)
+ghostLabel.Position = UDim2.new(0.06, 0, 0.06, 0)
+ghostLabel.BackgroundTransparency = 1
+ghostLabel.TextColor3 = Color3.new(1, 1, 1)
+ghostLabel.TextScaled = true
+ghostLabel.Font = Enum.Font.GothamSemibold
+ghostLabel.ZIndex = 51
+ghostLabel.Parent = dragGhost
+
+-- 1. HOTBAR CONTAINER (Bottom Center)
+local hotbarFrame = Instance.new("Frame")
+hotbarFrame.Name = "HotbarFrame"
+hotbarFrame.AnchorPoint = Vector2.new(0.5, 1)
+hotbarFrame.Position = UDim2.new(0.5, 0, 1, -12)
+hotbarFrame.Size = UDim2.new(0, 600, 0, 64)
+hotbarFrame.BackgroundTransparency = 1
+hotbarFrame.Parent = screenGui
+
+local hotbarLayout = Instance.new("UIListLayout")
+hotbarLayout.FillDirection = Enum.FillDirection.Horizontal
+hotbarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+hotbarLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+hotbarLayout.Padding = UDim.new(0, 6)
+hotbarLayout.Parent = hotbarFrame
+
+-- Helper to create a Roblox-styled Slot Button
+local function createSlotButton(name, parent, isBackpackBtn)
+	local btn = Instance.new("TextButton")
+	btn.Name = name
+	btn.Size = UDim2.new(0, 58, 0, 58)
+	btn.BackgroundColor3 = Color3.fromRGB(25, 27, 29)
+	btn.BackgroundTransparency = 0.25
+	btn.BorderSizePixel = 0
+	btn.Text = ""
+	btn.AutoButtonColor = false
+	btn.Parent = parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = btn
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Name = "SelectionStroke"
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Thickness = 2
+	stroke.Transparency = 1
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = btn
+
+	-- Tool Icon
+	local icon = Instance.new("ImageLabel")
+	icon.Name = "Icon"
+	icon.Size = UDim2.new(0.7, 0, 0.7, 0)
+	icon.Position = UDim2.new(0.15, 0, 0.15, 0)
+	icon.BackgroundTransparency = 1
+	icon.ScaleType = Enum.ScaleType.Fit
+	icon.Visible = false
+	icon.Parent = btn
+
+	-- Fallback Tool Name
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "ToolName"
+	nameLabel.Size = UDim2.new(0.88, 0, 0.88, 0)
+	nameLabel.Position = UDim2.new(0.06, 0, 0.06, 0)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+	nameLabel.TextScaled = true
+	nameLabel.Font = Enum.Font.GothamSemibold
+	nameLabel.TextWrapped = true
+	nameLabel.Visible = false
+	nameLabel.Parent = btn
+
+	local textConstraint = Instance.new("UITextSizeConstraint")
+	textConstraint.MaxTextSize = 13
+	textConstraint.Parent = nameLabel
+
+	if isBackpackBtn then
+		local bpIcon = Instance.new("TextLabel")
+		bpIcon.Size = UDim2.new(1, 0, 1, 0)
+		bpIcon.BackgroundTransparency = 1
+		bpIcon.Text = "🎒"
+		bpIcon.TextSize = 26
+		bpIcon.Font = Enum.Font.GothamBold
+		bpIcon.TextColor3 = Color3.new(1, 1, 1)
+		bpIcon.Parent = btn
+	else
+		local numLabel = Instance.new("TextLabel")
+		numLabel.Name = "SlotNumber"
+		numLabel.Size = UDim2.new(0, 18, 0, 18)
+		numLabel.Position = UDim2.new(0, 4, 0, 2)
+		numLabel.BackgroundTransparency = 1
+		numLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+		numLabel.TextSize = 12
+		numLabel.Font = Enum.Font.GothamBold
+		numLabel.TextXAlignment = Enum.TextXAlignment.Left
+		numLabel.Parent = btn
+
+		local dropMark = Instance.new("TextLabel")
+		dropMark.Name = "DroppableMark"
+		dropMark.Size = UDim2.new(0, 16, 0, 16)
+		dropMark.Position = UDim2.new(1, -18, 0, 2)
+		dropMark.BackgroundTransparency = 1
+		dropMark.Text = "X"
+		dropMark.TextColor3 = Color3.fromRGB(255, 95, 95)
+		dropMark.TextSize = 12
+		dropMark.Font = Enum.Font.GothamBlack
+		dropMark.Visible = false
+		dropMark.Parent = btn
+	end
+
+	return btn
+end
+
+-- Create 9 Hotbar Slots + 10th Backpack Slot
+local slotButtons = {}
+for i = 1, 9 do
+	local btn = createSlotButton("Slot_" .. i, hotbarFrame, false)
+	btn.SlotNumber.Text = tostring(i)
+	btn.LayoutOrder = i
+	slotButtons[i] = btn
+end
+
+local backpackSlotBtn = createSlotButton("BackpackToggle", hotbarFrame, true)
+backpackSlotBtn.LayoutOrder = 10
+
+-- 2. MIDDLE-RIGHT ACTION BUTTONS
+local sideActionFrame = Instance.new("Frame")
+sideActionFrame.Name = "SideActions"
+sideActionFrame.AnchorPoint = Vector2.new(1, 0.5)
+sideActionFrame.Position = UDim2.new(1, -15, 0.5, 0)
+sideActionFrame.Size = UDim2.new(0, 110, 0, 110)
+sideActionFrame.BackgroundTransparency = 1
+sideActionFrame.Parent = screenGui
+
+local sideLayout = Instance.new("UIListLayout")
+sideLayout.FillDirection = Enum.FillDirection.Vertical
+sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+sideLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+sideLayout.Padding = UDim.new(0, 8)
+sideLayout.Parent = sideActionFrame
+
+local function createSideButton(name, text, order)
+	local btn = Instance.new("TextButton")
+	btn.Name = name
+	btn.Size = UDim2.new(0, 105, 0, 44)
+	btn.BackgroundColor3 = Color3.fromRGB(25, 27, 29)
+	btn.BackgroundTransparency = 0.2
+	btn.Text = text
+	btn.TextColor3 = Color3.new(1, 1, 1)
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 14
+	btn.LayoutOrder = order
+	btn.Parent = sideActionFrame
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = btn
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Name = "BtnStroke"
+	stroke.Color = Color3.fromRGB(90, 95, 100)
+	stroke.Thickness = 1.5
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = btn
+
+	return btn
+end
+
+local dropActionBtn = createSideButton("DropButton", "Drop [⌫]", 1)
+local multiActionBtn = createSideButton("MultiButton", "Multi: OFF", 2)
+
+-- 3. BACKPACK INVENTORY WINDOW
+local backpackWindow = Instance.new("Frame")
+backpackWindow.Name = "BackpackWindow"
+backpackWindow.AnchorPoint = Vector2.new(0.5, 1)
+backpackWindow.Position = UDim2.new(0.5, 0, 1, -86)
+backpackWindow.Size = UDim2.new(0, 560, 0, 310)
+backpackWindow.BackgroundColor3 = Color3.fromRGB(22, 24, 26)
+backpackWindow.BackgroundTransparency = 0.1
+backpackWindow.Visible = false
+backpackWindow.Parent = screenGui
+
+local bpCorner = Instance.new("UICorner")
+bpCorner.CornerRadius = UDim.new(0, 10)
+bpCorner.Parent = backpackWindow
+
+local bpStroke = Instance.new("UIStroke")
+bpStroke.Color = Color3.fromRGB(70, 75, 80)
+bpStroke.Thickness = 1.5
+bpStroke.Parent = backpackWindow
+
+-- Top Control Bar
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, -20, 0, 36)
+topBar.Position = UDim2.new(0, 10, 0, 10)
+topBar.BackgroundTransparency = 1
+topBar.Parent = backpackWindow
+
+local searchBox = Instance.new("TextBox")
+searchBox.Size = UDim2.new(0.45, 0, 1, 0)
+searchBox.BackgroundColor3 = Color3.fromRGB(38, 41, 45)
+searchBox.PlaceholderText = "Search items..."
+searchBox.Text = ""
+searchBox.TextColor3 = Color3.new(1, 1, 1)
+searchBox.PlaceholderColor3 = Color3.fromRGB(160, 160, 160)
+searchBox.Font = Enum.Font.Gotham
+searchBox.TextSize = 14
+searchBox.ClearTextOnFocus = false
+searchBox.Parent = topBar
+Instance.new("UICorner", searchBox).CornerRadius = UDim.new(0, 6)
+
+local filterBtn = Instance.new("TextButton")
+filterBtn.Size = UDim2.new(0.32, 0, 1, 0)
+filterBtn.Position = UDim2.new(0.47, 0, 0, 0)
+filterBtn.BackgroundColor3 = Color3.fromRGB(45, 49, 54)
+filterBtn.Text = "Sort: Newest"
+filterBtn.TextColor3 = (1, 1, 1)
+filterBtn.Font = Enum.Font.GothamSemibold
+filterBtn.TextSize = 13
+filterBtn.Parent = topBar
+("UICorner", filterBtn).CornerRadius = (0, 6)
+local settingsBtn = ("TextButton")
+settingsBtn.Size = (0.19, 0, 1, 0)
+settingsBtn.Position = (0.81, 0, 0, 0)
+settingsBtn.BackgroundColor3 = Color3.fromRGB(45, 49, 54)
+settingsBtn.Text = "⚙️ Settings"
+settingsBtn.TextColor3 = (1, 1, 1)
+settingsBtn.Font = Enum.Font.GothamSemibold
+settingsBtn.TextSize = 13
+settingsBtn.Parent = topBar
+("UICorner", settingsBtn).CornerRadius = (0, 6)
+-- Inventory Scrolling Grid
+local gridScroll = ("ScrollingFrame")
+ = "ItemGrid"
+gridScroll.Size = (1, -20, 1, -60)
+gridScroll.Position = (0, 10, 0, 52)
+gridScroll.BackgroundTransparency = 1
+gridScroll.ScrollBarThickness = 5
+gridScroll.CanvasSize = (0, 0, 0, 0)
+gridScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+gridScroll.Parent = backpackWindow
+local gridLayout = ("UIGridLayout")
+gridLayout.CellSize = (0, 58, 0, 58)
+gridLayout.CellPadding = (0, 8, 0, 8)
+gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+gridLayout.Parent = gridScroll
+-- 4. SETTINGS PANEL
+local settingsPanel = ("Frame")
+ = "SettingsPanel"
+settingsPanel.Size = (1, -20, 1, -60)
+settingsPanel.Position = (0, 10, 0, 52)
+settingsPanel.BackgroundColor3 = Color3.fromRGB(30, 33, 36)
+settingsPanel.Visible = false
+settingsPanel.Parent = backpackWindow
+("UICorner", settingsPanel).CornerRadius = (0, 8)
+local setLayout = ("UIListLayout")
+setLayout.Padding = (0, 12)
+setLayout.HorizontalAlignment = 
+setLayout.VerticalAlignment = 
+setLayout.Parent = settingsPanel
+local function createSettingRow(labelText, btnText)
+local row = ("Frame")
+row.Size = (0.85, 0, 0, 38)
+row.BackgroundTransparency = 1
+row.Parent = settingsPanel
+local lbl = ("TextLabel")
+lbl.Size = (0.65, 0, 1, 0)
+lbl.BackgroundTransparency = 1
+lbl.Text = labelText
+lbl.TextColor3 = (1, 1, 1)
+lbl.Font = Enum.Font.GothamSemibold
+lbl.TextSize = 14
+lbl.TextXAlignment = Enum.TextXAlignment.Left
+lbl.Parent = row
+local btn = ("TextButton")
+btn.Size = (0.32, 0, 1, 0)
+btn.Position = (0.68, 0, 0, 0)
+btn.BackgroundColor3 = Color3.fromRGB(55, 120, 220)
+btn.Text = btnText
+btn.TextColor3 = (1, 1, 1)
+btn.Font = Enum.Font.GothamBold
+btn.TextSize = 14
+btn.Parent = row
+("UICorner", btn).CornerRadius = (0, 6)
+return btn
+end
+local slotCountSetBtn = createSettingRow("Hotbar Slot Count (1 - 9):", tostring(CONFIG.MaxSlots))
+local dropToggleSetBtn = createSettingRow("Show Drop Button:", "ON")
+local multiToggleSetBtn = createSettingRow("Show Multi-Equip Button:", "ON")
+-- ==========================================
+-- CORE INVENTORY & DRAG-AND-DROP LOGIC
+-- ==========================================
+local function getCharacter()
+return player.Character
+end
+local function isToolEquipped(tool)
+local char = getCharacter()
+return char and tool and tool.Parent == char
+end
+local function getEquippedTools()
+local equipped = {}
+local char = getCharacter()
+if char then
+for _, child in ipairs(char:GetChildren()) do
+if child:IsA("Tool") then
+table.insert(equipped, child)
+end
+end
+end
+return equipped
+end
+local function getAllTools()
+local tools = {}
+local backpack = player:FindFirstChild("Backpack")
+local char = getCharacter()
+if backpack then
+for _, item in ipairs(backpack:GetChildren()) do
+if item:IsA("Tool") then
+table.insert(tools, item)
+end
+end
+end
+if char then
+for _, item in ipairs(char:GetChildren()) do
+if item:IsA("Tool") then
+table.insert(tools, item)
+end
+end
+end
+return tools
+end
+local function isToolInHotbar(tool)
+for i = 1, CONFIG.MaxSlots do
+if HotbarSlots[i] == tool then
+return i
+end
+end
+return nil
+end
+local function syncSavedOrder()
+for i = 1, CONFIG.MaxSlots do
+if HotbarSlots[i] then
+SavedOrder[HotbarSlots[i].Name] = i
+end
+end
+end
+local function cancelActiveDrag()
+DragState.Active = false
+DragState.Started = false
+DragState.Tool = nil
+dragGhost.Visible = false
+end
+local function updateSideButtons()
+local equipped = getEquippedTools()
+local hasDroppableEquipped = false
+for _, tool in ipairs(equipped) do
+if tool.CanBeDropped then
+hasDroppableEquipped = true
+break
+end
+end
+local dropVisible = CONFIG.ShowDropBtn and hasDroppableEquipped
+local multiVisible = CONFIG.ShowMultiBtn
+if not dropVisible then
+dropActionBtn.Visible = false
+multiActionBtn.LayoutOrder = 1
+else
+if multiVisible and multiActionBtn.LayoutOrder == 1 and not dropActionBtn.Visible then
+dropActionBtn.LayoutOrder = 2
+else
+dropActionBtn.LayoutOrder = 1
+multiActionBtn.LayoutOrder = 2
+end
+dropActionBtn.Visible = true
+end
+multiActionBtn.Visible = multiVisible
+multiActionBtn.Text = MultiEquipMode and "Multi: ON" or "Multi: OFF"
+multiActionBtn.BtnStroke.Color = MultiEquipMode and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(90, 95, 100)
+end
+local function renderSlotVisual(btn, tool)
+if tool then
+if tool.TextureId ~= "" then
+btn.Icon.Image = tool.TextureId
+btn.Icon.Visible = true
+btn.ToolName.Visible = false
+else
+btn.Icon.Visible = false
+btn.ToolName.Text = 
+btn.ToolName.Visible = true
+end
+if btn:FindFirstChild("DroppableMark") then
+btn.DroppableMark.Visible = tool.CanBeDropped
+end
+if isToolEquipped(tool) then
+btn.SelectionStroke.Color = Color3.fromRGB(255, 255, 255)
+btn.SelectionStroke.Transparency = 0
+btn.BackgroundColor3 = Color3.fromRGB(45, 50, 56)
+else
+btn.SelectionStroke.Transparency = 1
+btn.BackgroundColor3 = Color3.fromRGB(25, 27, 29)
+end
+else
+btn.Icon.Visible = false
+btn.ToolName.Visible = false
+if btn:FindFirstChild("DroppableMark") then
+btn.DroppableMark.Visible = false
+end
+btn.SelectionStroke.Transparency = 1
+btn.BackgroundColor3 = Color3.fromRGB(25, 27, 29)
+end
+end
+local function isPointInGui(point, guiObj)
+if not guiObj or not guiObj.Visible then return false end
+local pos = guiObj.AbsolutePosition
+local size = guiObj.AbsoluteSize
+return point.X >= pos.X and point.X <= (pos.X + size.X)
+and point.Y >= pos.Y and point.Y <= (pos.Y + size.Y)
+end
+-- Begin tracking a potential drag ONLY if the backpack window is open
+local function beginPotentialDrag(input, tool, sourceType, sourceSlot)
+if not backpackWindow.Visible then return end
+if not tool then return end
+if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+return
+end
+DragState.Active = true
+DragState.Started = false
+DragState.Tool = tool
+DragState.SourceType = sourceType
+DragState.SourceSlot = sourceSlot
+DragState.StartPos = (input.Position.X, input.Position.Y)
+DragState.InputObj = input
+end
+local refreshUI -- Forward declaration
+local function finishDrag(endPos)
+if not DragState.Active then return end
+local wasDragging = DragState.Started
+local draggedTool = DragState.Tool
+local sourceType = DragState.SourceType
+local sourceSlot = DragState.SourceSlot
+cancelActiveDrag()
+if not backpackWindow.Visible or not wasDragging or not draggedTool then
+return
+end
+-- 1. Check if dropped onto a Hotbar Slot (1 .. MaxSlots)
+local targetHotbarSlot = nil
+for i = 1, CONFIG.MaxSlots do
+if isPointInGui(endPos, slotButtons[i]) then
+targetHotbarSlot = i
+break
+end
+end
+if targetHotbarSlot then
+if sourceType == "Hotbar" and sourceSlot then
+local displacedTool = HotbarSlots[targetHotbarSlot]
+HotbarSlots[targetHotbarSlot] = draggedTool
+HotbarSlots[sourceSlot] = displacedTool
+if displacedTool then
+SavedOrder[] = sourceSlot
+end
+SavedOrder[] = targetHotbarSlot
+elseif sourceType == "Backpack" then
+local existingSlot = isToolInHotbar(draggedTool)
+local displacedTool = HotbarSlots[targetHotbarSlot]
+if existingSlot then
+HotbarSlots[existingSlot] = displacedTool
+if displacedTool then
+SavedOrder[] = existingSlot
+end
+elseif displacedTool then
+SavedOrder[] = nil
+end
+HotbarSlots[targetHotbarSlot] = draggedTool
+SavedOrder[] = targetHotbarSlot
+end
+syncSavedOrder()
+refreshUI()
+return
+end
+-- 2. Check if dropped onto the Backpack Window
+if isPointInGui(endPos, backpackWindow) then
+if sourceType == "Hotbar" and sourceSlot then
+HotbarSlots[sourceSlot] = nil
+SavedOrder[] = nil
+refreshUI()
+return
+elseif sourceType == "Backpack" then
+for _, child in ipairs(gridScroll:GetChildren()) do
+if child:IsA("TextButton") and isPointInGui(endPos, child) then
+local targetToolName = string.sub(, 4)
+for toolObj, data in pairs(ToolData) do
+if  == targetToolName and toolObj ~= draggedTool then
+local draggedOrder = ToolData[draggedTool].AddedOrder
+ToolData[draggedTool].AddedOrder = data.AddedOrder
+data.AddedOrder = draggedOrder
+refreshUI()
+return
+end
+end
+end
+end
+end
+end
+end
+-- Update drag ghost position and highlight hovered target slot
+UserInputService.InputChanged:Connect(function(input)
+if not DragState.Active then return end
+if not backpackWindow.Visible then
+cancelActiveDrag()
+return
+end
+if input.UserInputType ~= Enum.UserInputType.MouseMovement and input ~= DragState.InputObj then
+return
+end
+local currentPos = (input.Position.X, input.Position.Y)
+if not DragState.Started then
+if (currentPos - DragState.StartPos).Magnitude >= 10 then
+DragState.Started = true
+local tool = DragState.Tool
+if tool.TextureId ~= "" then
+ghostIcon.Image = tool.TextureId
+ghostIcon.Visible = true
+ghostLabel.Visible = false
+else
+ghostIcon.Visible = false
+ghostLabel.Text = 
+ghostLabel.Visible = true
+end
+dragGhost.Visible = true
+end
+end
+if DragState.Started then
+dragGhost.Position = UDim2.fromOffset(currentPos.X, currentPos.Y)
+for i = 1, CONFIG.MaxSlots do
+local btn = slotButtons[i]
+if isPointInGui(currentPos, btn) then
+btn.SelectionStroke.Color = Color3.fromRGB(120, 200, 255)
+btn.SelectionStroke.Transparency = 0
+elseif not isToolEquipped(HotbarSlots[i]) then
+btn.SelectionStroke.Transparency = 1
+end
+end
+end
+end)
+UserInputService.InputEnded:Connect(function(input)
+if not DragState.Active then return end
+if input.UserInputType == Enum.UserInputType.MouseButton1 or input == DragState.InputObj then
+local endPos = (input.Position.X, input.Position.Y)
+task.defer(function()
+finishDrag(endPos)
+end)
+end
+end)
+refreshUI = function()
+for i = 1, 9 do
+local btn = slotButtons[i]
+if i <= CONFIG.MaxSlots then
+btn.Visible = true
+renderSlotVisual(btn, HotbarSlots[i])
+else
+btn.Visible = false
+end
+end
+if backpackWindow.Visible and not settingsPanel.Visible then
+for _, child in ipairs(gridScroll:GetChildren()) do
+if child:IsA("TextButton") then
+child:Destroy()
+end
+end
+local allTools = getAllTools()
+local filtered = {}
+for _, tool in ipairs(allTools) do
+local matchesSearch = (SearchQuery == "") or string.find(string.lower(), string.lower(SearchQuery), 1, true)
+local matchesFilter = true
+if CurrentFilter == "Droppable" then
+matchesFilter = tool.CanBeDropped
+elseif CurrentFilter == "Undroppable" then
+matchesFilter = not tool.CanBeDropped
+end
+if matchesSearch and matchesFilter then
+table.insert(filtered, tool)
+end
+end
+table.sort(filtered, function(a, b)
+local orderA = ToolData[a] and ToolData[a].AddedOrder or 0
+local orderB = ToolData[b] and ToolData[b].AddedOrder or 0
+if CurrentFilter == "Oldest" then
+return orderA < orderB
+else
+return orderA > orderB
+end
+end)
+for idx, tool in ipairs(filtered) do
+local itemBtn = createSlotButton("BP_" .. , gridScroll, false)
+itemBtn.SlotNumber.Text = ""
+itemBtn.LayoutOrder = idx
+renderSlotVisual(itemBtn, tool)
+if isToolInHotbar(tool) then
+itemBtn.SelectionStroke.Color = Color3.fromRGB(100, 200, 255)
+itemBtn.SelectionStroke.Transparency = 0.2
+end
+itemBtn.InputBegan:Connect(function(input)
+beginPotentialDrag(input, tool, "Backpack", nil)
+end)
+itemBtn.MouseButton1Click:Connect(function()
+if DragState.Started then return end
+local existingSlot = isToolInHotbar(tool)
+if existingSlot then
+HotbarSlots[existingSlot] = nil
+SavedOrder[] = nil
+else
+for s = 1, CONFIG.MaxSlots do
+if not HotbarSlots[s] then
+HotbarSlots[s] = tool
+SavedOrder[] = s
+break
+end
+end
+end
+refreshUI()
+end)
+end
+end
+updateSideButtons()
+end
+local function toggleEquipTool(tool)
+if not tool then return end
+local char = getCharacter()
+local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+local backpack = player:FindFirstChild("Backpack")
+if not humanoid or not backpack then return end
+if isToolEquipped(tool) then
+tool.Parent = backpack
+else
+if not MultiEquipMode then
+humanoid:UnequipTools()
+end
+tool.Parent = char
+end
+refreshUI()
+end
+local function dropEquippedTool()
+local char = getCharacter()
+if not char then return end
+for _, tool in ipairs(getEquippedTools()) do
+if tool.CanBeDropped then
+local slot = isToolInHotbar(tool)
+if slot then
+HotbarSlots[slot] = nil
+end
+tool.Parent = workspace
+break
+end
+end
+refreshUI()
+end
+local function registerTool(tool)
+if not tool:IsA("Tool") then return end
+if not ToolData[tool] then
+OrderCounter += 1
+ToolData[tool] = { AddedOrder = OrderCounter }
+end
+if isToolInHotbar(tool) then
+refreshUI()
+return
+end
+local savedSlot = SavedOrder[]
+if savedSlot and savedSlot <= CONFIG.MaxSlots and not HotbarSlots[savedSlot] then
+HotbarSlots[savedSlot] = tool
+refreshUI()
+return
+end
+for i = 1, CONFIG.MaxSlots do
+if not HotbarSlots[i] then
+HotbarSlots[i] = tool
+SavedOrder[] = i
+break
+end
+end
+refreshUI()
+end
+local function unregisterTool(tool)
+if not tool:IsA("Tool") then return end
+task.defer(function()
+local backpack = player:FindFirstChild("Backpack")
+local char = getCharacter()
+if tool.Parent ~= backpack and tool.Parent ~= char then
+for i = 1, 9 do
+if HotbarSlots[i] == tool then
+HotbarSlots[i] = nil
+end
+end
+ToolData[tool] = nil
+refreshUI()
+end
+end)
+end
+-- ==========================================
+-- CONNECTIONS & INPUTS
+-- ==========================================
+for i = 1, 9 do
+slotButtons[i].InputBegan:Connect(function(input)
+if HotbarSlots[i] then
+beginPotentialDrag(input, HotbarSlots[i], "Hotbar", i)
+end
+end)
+slotButtons[i].MouseButton1Click:Connect(function()
+if DragState.Started then return end
+if HotbarSlots[i] then
+toggleEquipTool(HotbarSlots[i])
+end
+end)
+end
+backpackSlotBtn.MouseButton1Click:Connect(function()
+backpackWindow.Visible = not backpackWindow.Visible
+settingsPanel.Visible = false
+if not backpackWindow.Visible then
+cancelActiveDrag()
+end
+refreshUI()
+end)
+dropActionBtn.MouseButton1Click:Connect(dropEquippedTool)
+multiActionBtn.MouseButton1Click:Connect(function()
+MultiEquipMode = not MultiEquipMode
+if not MultiEquipMode then
+local equipped = getEquippedTools()
+local backpack = player:FindFirstChild("Backpack")
+if #equipped > 1 and backpack then
+for i = 2, #equipped do
+equipped[i].Parent = backpack
+end
+end
+end
+refreshUI()
+end)
+local Filters = { "Newest", "Oldest", "Droppable", "Undroppable" }
+local filterIndex = 1
+filterBtn.MouseButton1Click:Connect(function()
+filterIndex = (filterIndex % #Filters) + 1
+CurrentFilter = Filters[filterIndex]
+filterBtn.Text = "Sort: " .. CurrentFilter
+refreshUI()
+end)
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+SearchQuery = searchBox.Text
+refreshUI()
+end)
+settingsBtn.MouseButton1Click:Connect(function()
+settingsPanel.Visible = not settingsPanel.Visible
+gridScroll.Visible = not settingsPanel.Visible
+if not settingsPanel.Visible then
+refreshUI()
+end
+end)
+slotCountSetBtn.MouseButton1Click:Connect(function()
+CONFIG.MaxSlots = (CONFIG.MaxSlots % 9) + 1
+slotCountSetBtn.Text = tostring(CONFIG.MaxSlots)
+for i = CONFIG.MaxSlots + 1, 9 do
+HotbarSlots[i] = nil
+end
+refreshUI()
+end)
+dropToggleSetBtn.MouseButton1Click:Connect(function()
+CONFIG.ShowDropBtn = not CONFIG.ShowDropBtn
+dropToggleSetBtn.Text = CONFIG.ShowDropBtn and "ON" or "OFF"
+dropToggleSetBtn.BackgroundColor3 = CONFIG.ShowDropBtn and Color3.fromRGB(55, 120, 220) or Color3.fromRGB(140, 60, 60)
+updateSideButtons()
+end)
+multiToggleSetBtn.MouseButton1Click:Connect(function()
+CONFIG.ShowMultiBtn = not CONFIG.ShowMultiBtn
+multiToggleSetBtn.Text = CONFIG.ShowMultiBtn and "ON" or "OFF"
+multiToggleSetBtn.BackgroundColor3 = CONFIG.ShowMultiBtn and Color3.fromRGB(55, 120, 220) or Color3.fromRGB(140, 60, 60)
+updateSideButtons()
+end)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+if gameProcessed then return end
+if input.KeyCode == Enum.KeyCode.Backspace then
+dropEquippedTool()
+return
+end
+for i = 1, CONFIG.MaxSlots do
+if input.KeyCode == KeyCodes[i] then
+if HotbarSlots[i] then
+toggleEquipTool(HotbarSlots[i])
+end
+break
+end
+end
+end)
+local function onCharacterAdded(char)
+HotbarSlots = {}
+local backpack = player:WaitForChild("Backpack")
+for _, item in ipairs(backpack:GetChildren()) do
+registerTool(item)
+end
+for _, item in ipairs(char:GetChildren()) do
+registerTool(item)
+end
+backpack.ChildAdded:Connect(registerTool)
+backpack.ChildRemoved:Connect(unregisterTool)
+char.ChildAdded:Connect(registerTool)
+char.ChildRemoved:Connect(unregisterTool)
+refreshUI()
+end
+if player.Character then
+onCharacterAdded(player.Character)
+end
+player.CharacterAdded:Connect(onCharacterAdded)
