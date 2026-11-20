@@ -1,42 +1,62 @@
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 
+local LocalPlayer = Players.LocalPlayer
 local Cast = ReplicatedStorage:WaitForChild("Cast")
 local KJFlexWorks = Cast:WaitForChild("KJFlexWorks")
 local KJVFX = Cast:WaitForChild("KJVFX")
 
--- Initialize default state if not already set by WindUI
+local CANCEL_ANIM_ID = "124093631117683"
+
 if getgenv().FlexWorksDetector == nil then
     getgenv().FlexWorksDetector = false
 end
 
--- Prevent duplicate listeners if you re-execute this standalone script
 if getgenv().FlexWorksConnection then
     getgenv().FlexWorksConnection:Disconnect()
 end
 
-local activeTimers = {}
+local activeEntries = {}
 
-local function stopFlexWorks(targetCharacter)
-    if activeTimers[targetCharacter] then
-        task.cancel(activeTimers[targetCharacter])
-        activeTimers[targetCharacter] = nil
+local function getLiveCharacter(targetPlayer, fallbackCharacter)
+    if targetPlayer then
+        local liveFolder = workspace:FindFirstChild("Live") or workspace:FindFirstChild("Players")
+        if liveFolder and liveFolder:FindFirstChild(targetPlayer.Name) then
+            return liveFolder[targetPlayer.Name]
+        end
+        if targetPlayer.Character then
+            return targetPlayer.Character
+        end
+    end
+    return fallbackCharacter
+end
+
+local function stopFlexWorks(key, fallbackCharacter)
+    local entry = activeEntries[key]
+    if entry then
+        if entry.timer then
+            task.cancel(entry.timer)
+        end
+        if entry.animConn then
+            entry.animConn:Disconnect()
+        end
+        if entry.highlight and entry.highlight.Parent then
+            entry.highlight:Destroy()
+        end
+        activeEntries[key] = nil
     end
 
-    if targetCharacter and targetCharacter.Parent then
-        local highlight = targetCharacter:FindFirstChild("FlexWorksHighlight")
-        if highlight then
-            highlight:Destroy()
-        end
-        firesignal(KJVFX.OnClientEvent, "AuraEnd", targetCharacter)
+    local char = (entry and entry.character) or fallbackCharacter
+    if char and char.Parent then
+        firesignal(KJVFX.OnClientEvent, "AuraEnd", char)
     end
 end
 
--- Expose global cleanup function for WindUI to call on toggle-off
 getgenv().StopAllFlexWorks = function()
-    for character, _ in pairs(activeTimers) do
-        stopFlexWorks(character)
+    for key, _ in pairs(activeEntries) do
+        stopFlexWorks(key)
     end
 end
 
@@ -44,12 +64,26 @@ getgenv().FlexWorksConnection = KJFlexWorks.OnClientEvent:Connect(function(actio
     if not getgenv().FlexWorksDetector then return end
     if typeof(targetCharacter) ~= "Instance" then return end
 
-    if action == "Ready" then
-        if activeTimers[targetCharacter] then
-            task.cancel(activeTimers[targetCharacter])
-        end
+    local targetPlayer = Players:GetPlayerFromCharacter(targetCharacter)
+        or Players:FindFirstChild(targetCharacter.Name)
 
-        local targetPlayer = Players:GetPlayerFromCharacter(targetCharacter)
+    local isSelf = (targetPlayer == LocalPlayer) or (targetCharacter == LocalPlayer.Character)
+    local liveChar = getLiveCharacter(targetPlayer, targetCharacter)
+
+    -- Self-trigger: fire Aura2 once and exit immediately (no highlight, notification, or end timer)
+    if isSelf then
+        if action == "Ready" and liveChar then
+            firesignal(KJVFX.OnClientEvent, "Aura2", liveChar)
+        end
+        return
+    end
+
+    local key = targetPlayer or targetCharacter
+
+    if action == "Ready" then
+        stopFlexWorks(key, liveChar)
+        if not liveChar then return end
+
         local displayName = targetPlayer and targetPlayer.DisplayName or targetCharacter.Name
 
         pcall(function()
@@ -60,25 +94,44 @@ getgenv().FlexWorksConnection = KJFlexWorks.OnClientEvent:Connect(function(actio
             })
         end)
 
-        local highlight = targetCharacter:FindFirstChild("FlexWorksHighlight")
-        if not highlight then
-            highlight = Instance.new("Highlight")
-            highlight.Name = "FlexWorksHighlight"
-            highlight.FillColor = Color3.fromRGB(255, 0, 0)
-            highlight.FillTransparency = 0.5
-            highlight.OutlineColor = Color3.fromRGB(255, 80, 80)
-            highlight.OutlineTransparency = 0.2
-            highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            highlight.Parent = targetCharacter
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "FlexWorksHighlight"
+        highlight.Adornee = liveChar
+        highlight.FillColor = Color3.fromRGB(255, 0, 0)
+        highlight.FillTransparency = 0.5
+        highlight.OutlineColor = Color3.fromRGB(255, 80, 80)
+        highlight.OutlineTransparency = 0.2
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Parent = liveChar
+
+        Debris:AddItem(highlight, 7)
+
+        firesignal(KJVFX.OnClientEvent, "AuraStart", liveChar)
+
+        -- Cancel highlight & aura immediately if animation 124093631117683 plays
+        local animConn = nil
+        local humanoid = liveChar:FindFirstChildOfClass("Humanoid")
+        local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+
+        if animator then
+            animConn = animator.AnimationPlayed:Connect(function(track)
+                local animId = track.Animation and track.Animation.AnimationId or ""
+                if string.find(animId, CANCEL_ANIM_ID, 1, true) then
+                    stopFlexWorks(key, liveChar)
+                end
+            end)
         end
 
-        firesignal(KJVFX.OnClientEvent, "AuraStart", targetCharacter)
-
-        activeTimers[targetCharacter] = task.delay(7, function()
-            stopFlexWorks(targetCharacter)
-        end)
+        activeEntries[key] = {
+            highlight = highlight,
+            character = liveChar,
+            animConn = animConn,
+            timer = task.delay(7, function()
+                stopFlexWorks(key, liveChar)
+            end)
+        }
 
     elseif action == "ReadyEnd" then
-        stopFlexWorks(targetCharacter)
+        stopFlexWorks(key, liveChar)
     end
 end)
