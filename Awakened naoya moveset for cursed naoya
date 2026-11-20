@@ -1,1 +1,35 @@
-?
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+local moves = {
+	{ toolName = "You Ain't Toji", eventName = "YouAintToji" },
+	{ toolName = "No Mercy Beatdown", eventName = "NoMercy" },
+	{ toolName = "Decisive Strikes", eventName = "DecisiveStrikes" },
+	{ toolName = "Rapid Strike", eventName = "Rapid Strike" },
+}
+
+for _, move in ipairs(moves) do
+	local tool = Instance.new("Tool")
+	tool.Name = move.toolName
+	tool.RequiresHandle = false
+	tool.CanBeDropped = false
+
+	-- Trigger immediately when selected/pressed in the hotbar
+	tool.Equipped:Connect(function()
+		local Event = ReplicatedStorage:WaitForChild("SkillCast")
+			:WaitForChild("Naoya")
+			:WaitForChild("Awakening")
+			:WaitForChild(move.eventName)
+
+		Event:FireServer()
+
+		-- Immediately unequip so it acts as a single-tap button
+		task.wait()
+		tool.Parent = backpack
+	end)
+
+	tool.Parent = backpack
+end
