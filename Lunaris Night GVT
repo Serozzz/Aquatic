@@ -288,6 +288,134 @@ tool.Parent = backpack
     end,
 })
 
+MainTab:Button({
+    Title = "You Ain't Toji",
+    Desc = "For cursed naoya, read Naoya awakening moveset for more info.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+local tool = Instance.new("Tool")
+tool.Name = "You Ain't Toji"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Naoya")
+		:WaitForChild("Awakening")
+		:WaitForChild("YouAintToji")
+
+	Event:FireServer()
+
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
+    end,
+})
+
+MainTab:Button({
+    Title = "No Mercy Beatdown",
+    Desc = "For cursed naoya, read Naoya awakening moveset for more info.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+local tool = Instance.new("Tool")
+tool.Name = "No Mercy Beatdown"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Naoya")
+		:WaitForChild("Awakening")
+		:WaitForChild("NoMercy")
+
+	Event:FireServer()
+
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
+    end,
+})
+
+MainTab:Button({
+    Title = "Decisive Strikes",
+    Desc = "For cursed naoya, read Naoya awakening moveset for more info.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+local tool = Instance.new("Tool")
+tool.Name = "Decisive Strikes"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Naoya")
+		:WaitForChild("Awakening")
+		:WaitForChild("DecisiveStrikes")
+
+	Event:FireServer()
+
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
+    end,
+})
+
+MainTab:Button({
+    Title = "Rapid Strike",
+    Desc = "For cursed naoya, read Naoya awakening moveset for more info.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+local tool = Instance.new("Tool")
+tool.Name = "Rapid Strike"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Naoya")
+		:WaitForChild("Awakening")
+		:WaitForChild("Rapid Strike")
+
+	Event:FireServer()
+
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
+    end,
+})
+
 
 WindUI:Notify({
     Title = "Loaded",
