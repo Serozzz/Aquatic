@@ -160,10 +160,138 @@ MainTab:Button({
     end,
 })
 
+MainTab:Button({
+    Title = "Sparks Of Black",
+    Desc = "Works for every character.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+local tool = Instance.new("Tool")
+tool.Name = "Sparks Of Black"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Strongest Of Today")
+		:WaitForChild("Base")
+		:WaitForChild("Sparks Of Black")
+
+	Event:FireServer()
+
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
+    end,
+})
+
+MainTab:Button({
+    Title = "Crushing Rushdown",
+    Desc = "Works for every character.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+local tool = Instance.new("Tool")
+tool.Name = "Crushing Rushdown"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Strongest Of Today")
+		:WaitForChild("Base")
+		:WaitForChild("Crushing Rushdown")
+
+	Event:FireServer()
+
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
+    end,
+})
+
+MainTab:Button({
+    Title = "Lethal Combo",
+    Desc = "Works for every character.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+local tool = Instance.new("Tool")
+tool.Name = "Lethal Combo"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Strongest Of Today")
+		:WaitForChild("Base")
+		:WaitForChild("Lethal Combo")
+
+	Event:FireServer()
+
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
+    end,
+})
+
+MainTab:Button({
+    Title = "Reversal Grab",
+    Desc = "Works for every character.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+local tool = Instance.new("Tool")
+tool.Name = "Reversal Grab"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Strongest Of Today")
+		:WaitForChild("Base")
+		:WaitForChild("Reversal Grab")
+
+	Event:FireServer()
+
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
+    end,
+})
+
 
 WindUI:Notify({
     Title = "Loaded",
-    Content = "supercalifragilisticexpliadocious",
+    Content = "supercalifragilisticexpliadocious!",
     Icon = "check",
     Duration = 4,
 })
