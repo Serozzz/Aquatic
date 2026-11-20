@@ -28,7 +28,7 @@ MainTab:Space()
 
 local InfoPara = MainTab:Paragraph({
     Title = "Abilities",
-    Desc = "Character specific, Blatant. Only works for the character that the ability originates from. (Cooldowns Apply, Cooldown Indicator coming soon.)",
+    Desc = "Character specific, Blatant. Only works for the character that the ability originates from, Except SOT Base moveset. (Cooldowns Apply.)",
     Image = "info",
     ImageSize = 20,
 })
@@ -148,6 +148,15 @@ MainTab:Button({
     Locked = false, -- Set true to disable clicking
     Callback = function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/Serozzz/Aquatic/refs/heads/main/Awakened%20naoya%20moveset%20for%20cursed%20naoya"))()
+    end,
+})
+
+MainTab:Button({
+    Title = "SOT Base moveset",
+    Desc = "Works for every character.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Serozzz/Aquatic/refs/heads/main/Base%20sot%20moveset%20for%20any%20character"))()
     end,
 })
 
