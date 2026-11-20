@@ -544,6 +544,34 @@ tool.Parent = backpack
 MainTab:Divider()
 MainTab:Space()
 
+local Section = MainTab:Section({
+    Title = "Anti-Counters",
+    TextXAlignment = "Left",
+    TextSize = 31,
+})
+
+if not getgenv().FlexWorksLoaded then
+    getgenv().FlexWorksLoaded = true
+    task.spawn(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Serozzz/Aquatic/refs/heads/main/Anti%20unlimited%20flexworks%20GVT"))()
+    end)
+end
+
+MainTab:Toggle({
+    Title = "Anti-UFW",
+    Desc = "Highlights players that used unlimited flexworks while this is toggled on.",
+    Value = getgenv().FlexWorksDetector or false,
+    Callback = function(state)
+        getgenv().FlexWorksDetector = state
+        
+        -- Immediately clean up active highlights/auras if turned off
+        if not state and getgenv().StopAllFlexWorks then
+            getgenv().StopAllFlexWorks()
+        end
+    end
+})
+
+
 WindUI:Notify({
     Title = "Loaded",
     Content = "supercalifragilisticexpliadocious!",
