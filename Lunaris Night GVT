@@ -20,7 +20,7 @@ local MainTab = Window:Tab({
 local Section = MainTab:Section({
     Title = "Combat",
     TextXAlignment = "Left",
-    TextSize = 31,
+    TextSize = 37,
 })
 
 MainTab:Divider()
