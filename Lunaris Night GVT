@@ -416,6 +416,133 @@ tool.Parent = backpack
     end,
 })
 
+MainTab:Divider()
+MainTab:Space()
+
+local Section = MainTab:Section({
+    Title = "QTE Abilities",
+    TextXAlignment = "Left",
+    TextSize = 31,
+})
+
+MainTab:Button({
+    Title = "Mahito Black flash",
+    Desc = "True curse",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+-- Create the Tool
+local tool = Instance.new("Tool")
+tool.Name = "True Curse: Black Flash"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+-- Trigger immediately when selected/pressed in the hotbar
+tool.Equipped:Connect(function()
+	local Event = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Mahito")
+		:WaitForChild("Base")
+		:WaitForChild("True Curse")
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+
+	local animConnection
+	local timeoutTask
+
+	-- Listen for animation 91453093177501
+	if animator then
+		animConnection = animator.AnimationPlayed:Connect(function(track)
+			local animId = track.Animation and track.Animation.AnimationId or ""
+			if string.find(animId, "91453093177501") then
+				if animConnection then
+					animConnection:Disconnect()
+					animConnection = nil
+				end
+				if timeoutTask then
+					task.cancel(timeoutTask)
+				end
+
+				task.wait(2.05)
+				Event:FireServer("QTE")
+			end
+		end)
+
+		-- Clean up listener after 6 seconds if the move misses or gets interrupted
+		timeoutTask = task.delay(6, function()
+			if animConnection then
+				animConnection:Disconnect()
+				animConnection = nil
+			end
+		end)
+	end
+
+	-- Fire the initial move
+	Event:FireServer()
+
+	-- Immediately unequip so it acts as a single-tap button
+	task.wait()
+	tool.Parent = backpack
+end)
+
+tool.Parent = backpack
+    end,
+})
+
+MainTab:Button({
+    Title = "Yuji Black flash",
+    Desc = "Divergent fist",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local backpack = player:WaitForChild("Backpack")
+
+-- Create the Tool
+local tool = Instance.new("Tool")
+tool.Name = "Black Flash"
+tool.RequiresHandle = false
+tool.CanBeDropped = false
+
+-- Trigger immediately when selected/pressed in the hotbar
+tool.Equipped:Connect(function()
+	local divergentFistEvent = ReplicatedStorage:WaitForChild("SkillCast")
+		:WaitForChild("Sukuna")
+		:WaitForChild("Base")
+		:WaitForChild("Divergent Fist")
+
+	local blackflashEvent = ReplicatedStorage:WaitForChild("Cast")
+		:WaitForChild("BlackflashSuccess")
+
+	-- Fire initial Divergent Fist
+	divergentFistEvent:FireServer()
+
+	-- Immediately unequip so it acts as a single-tap button
+	task.spawn(function()
+		task.wait()
+		tool.Parent = backpack
+	end)
+
+	-- Wait 0.4 seconds then trigger Black Flash
+	task.wait(0.4)
+	blackflashEvent:FireServer()
+end)
+
+tool.Parent = backpack
+
+    end,
+})
+
+MainTab:Divider()
+MainTab:Space()
 
 WindUI:Notify({
     Title = "Loaded",
