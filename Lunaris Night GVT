@@ -31,7 +31,8 @@ local InfoPara = MainTab:Paragraph({
     Desc = "Character specific, only works for the character that the ability originates from.",
     Image = "info",
     ImageSize = 20,
-    
+})
+
 -- Optional: InfoPara:SetDesc("Updated text!")
 
 MainTab:Button({
