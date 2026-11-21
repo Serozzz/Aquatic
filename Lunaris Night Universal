@@ -96,3 +96,5 @@ WindUI:Notify({
     Icon = "check",
     Duration = 4,
 })
+
+MainTab:Select()
