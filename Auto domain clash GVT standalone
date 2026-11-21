@@ -1,0 +1,220 @@
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local TARGET_NAMES = { "1", "2", "3", "4" }
+local stepDelay = 0.051
+local MAX_CYCLES = 12
+local isRunning = false
+
+local SPECIAL_KEYS: { [string]: Enum.KeyCode } = {
+	[" "] = Enum.KeyCode.Space,
+	["SPACE"] = Enum.KeyCode.Space,
+	["ENTER"] = Enum.KeyCode.Return,
+	["RETURN"] = Enum.KeyCode.Return,
+	["SHIFT"] = Enum.KeyCode.LeftShift,
+	["LSHIFT"] = Enum.KeyCode.LeftShift,
+	["RSHIFT"] = Enum.KeyCode.RightShift,
+	["CTRL"] = Enum.KeyCode.LeftControl,
+	["LCTRL"] = Enum.KeyCode.LeftControl,
+	["TAB"] = Enum.KeyCode.Tab,
+	["ESC"] = Enum.KeyCode.Escape,
+}
+
+local function formatDelay(val: number): string
+	local formatted = string.format("%.4f", val)
+	formatted = string.gsub(formatted, "0+$", "")
+	formatted = string.gsub(formatted, "%.$", "")
+	return formatted
+end
+
+local function getStepDelay(): number
+	return stepDelay
+end
+
+local function notify(title: string, text: string)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = title,
+			Text = text,
+			Duration = 4,
+		})
+	end)
+end
+
+local function readClashTexts(): { string }
+	local list = {}
+	local clashGui = playerGui:FindFirstChild("DomainClashKeys")
+	local clash = clashGui and clashGui:FindFirstChild("Clash")
+	local frame = clash and clash:FindFirstChild("Frame")
+
+	if not frame then
+		warn("[DomainClash] Could not find PlayerGui.DomainClashKeys.Clash.Frame")
+		return list
+	end
+
+	for _, slotName in ipairs(TARGET_NAMES) do
+		local slot = frame:FindFirstChild(slotName)
+		local label = slot and slot:FindFirstChild("TextLabel")
+		if label and (label:IsA("TextLabel") or label:IsA("TextButton") or label:IsA("TextBox")) then
+			table.insert(list, label.Text)
+		else
+			warn("[DomainClash] Missing TextLabel in slot: " .. slotName)
+			table.insert(list, "")
+		end
+	end
+
+	return list
+end
+
+local function resolveKeyCode(rawText: string): Enum.KeyCode?
+	local cleaned = string.upper(string.match(rawText, "^%s*(.-)%s*$") or "")
+	if cleaned == "" then
+		return nil
+	end
+
+	if SPECIAL_KEYS[cleaned] then
+		return SPECIAL_KEYS[cleaned]
+	end
+
+	local ok, keyCode = pcall(function()
+		return (Enum.KeyCode :: any)[cleaned]
+	end)
+
+	if ok and typeof(keyCode) == "EnumItem" and keyCode.EnumType == Enum.KeyCode then
+		return keyCode
+	end
+
+	return nil
+end
+
+local function pressKey(keyCode: Enum.KeyCode)
+	pcall(function()
+		VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+		task.wait(0.02)
+		VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+	end)
+end
+
+local function createActionButton()
+	local existingGui = playerGui:FindFirstChild("DomainClashTriggerGui")
+	if existingGui then
+		existingGui:Destroy()
+	end
+
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "DomainClashTriggerGui"
+	screenGui.ResetOnSpawn = false
+	screenGui.Parent = playerGui
+
+	-- Shifted upward from center-right (0.36) so it stays clear of Shift Lock
+	local delayInput = Instance.new("TextBox")
+	delayInput.Name = "DelayInputBox"
+	delayInput.AnchorPoint = Vector2.new(1, 0.5)
+	delayInput.Position = UDim2.new(1, -24, 0.36, -46)
+	delayInput.Size = UDim2.new(0, 148, 0, 36)
+	delayInput.BackgroundColor3 = Color3.fromRGB(28, 32, 38)
+	delayInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+	delayInput.PlaceholderText = "Delay (sec)"
+	delayInput.PlaceholderColor3 = Color3.fromRGB(140, 148, 162)
+	delayInput.Font = Enum.Font.GothamMedium
+	delayInput.TextSize = 13
+	delayInput.Text = formatDelay(stepDelay)
+	delayInput.ClearTextOnFocus = false
+	delayInput.Active = true
+	delayInput.Parent = screenGui
+
+	local inputCorner = Instance.new("UICorner")
+	inputCorner.CornerRadius = UDim.new(0, 8)
+	inputCorner.Parent = delayInput
+
+	local inputStroke = Instance.new("UIStroke")
+	inputStroke.Color = Color3.fromRGB(90, 100, 120)
+	inputStroke.Thickness = 1.5
+	inputStroke.Parent = delayInput
+
+	local button = Instance.new("TextButton")
+	button.Name = "FireClashButton"
+	button.AnchorPoint = Vector2.new(1, 0.5)
+	button.Position = UDim2.new(1, -24, 0.36, 0)
+	button.Size = UDim2.new(0, 148, 0, 44)
+	button.BackgroundColor3 = Color3.fromRGB(35, 39, 46)
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 14
+	button.Text = "Run Clash (12x)"
+	button.Active = true
+	button.Draggable = false
+	button.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = button
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(90, 100, 120)
+	stroke.Thickness = 1.5
+	stroke.Parent = button
+
+	local function applyDelayFromBox()
+		local raw = string.match(delayInput.Text, "^%s*(.-)%s*$") or ""
+		local parsed = tonumber(raw)
+		if parsed and parsed == parsed and math.abs(parsed) ~= math.huge then
+			stepDelay = parsed
+			delayInput.Text = formatDelay(stepDelay)
+		else
+			delayInput.Text = formatDelay(stepDelay)
+		end
+	end
+
+	delayInput.FocusLost:Connect(applyDelayFromBox)
+
+	button.MouseButton1Click:Connect(function()
+		if isRunning then
+			return
+		end
+
+		applyDelayFromBox()
+		isRunning = true
+		button.Text = "Running..."
+		button.BackgroundColor3 = Color3.fromRGB(70, 50, 50)
+		notify("Domain Clash", string.format("Process started (12x, %ss).", formatDelay(getStepDelay())))
+
+		task.spawn(function()
+			for cycle = 1, MAX_CYCLES do
+				local textList = readClashTexts()
+				local currentDelay = getStepDelay()
+				print(string.format("[DomainClash] Cycle %d/%d (delay %ss) read: %s", cycle, MAX_CYCLES, formatDelay(currentDelay), table.concat(textList, ", ")))
+
+				for index, textValue in ipairs(textList) do
+					local keyCode = resolveKeyCode(textValue)
+					if keyCode then
+						pressKey(keyCode)
+					else
+						warn("[DomainClash] Unmapped key text: " .. tostring(textValue))
+					end
+
+					if index < #textList then
+						task.wait(getStepDelay())
+					end
+				end
+
+				table.clear(textList)
+
+				if cycle < MAX_CYCLES then
+					task.wait(getStepDelay())
+				end
+			end
+
+			isRunning = false
+			button.Text = "Run Clash (12x)"
+			button.BackgroundColor3 = Color3.fromRGB(35, 39, 46)
+			notify("Domain Clash", "Process ended after 12 cycles.")
+		end)
+	end)
+end
+
+createActionButton()
