@@ -14,14 +14,78 @@ local Window = WindUI:CreateWindow({
 
 local MainTab = Window:Tab({
     Title = "Main",
-    Icon = "home", -- Lucide icon name or rbxassetid://
+    Icon = "house", -- Lucide icon name or rbxassetid://
 })
 
 local Section = MainTab:Section({
-    Title = "?",
+    Title = "Utilities & Stuff",
     TextXAlignment = "Left",
     TextSize = 37,
 })
+
+MainTab:Button({
+    Title = "Custom Inventory",
+    Desc = "Useful for mobile players.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Serozzz/Aquatic/refs/heads/main/Custom%20Hotbar%20and%20Inventory"))()
+    end,
+})
+
+MainTab:Button({
+    Title = "Secure Dex explorer",
+    Desc = "Dex re-continued, if the regular dex from infinite yield does not work, this will help.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        loadstring(game:HttpGet("https://github.com/Tesker-103/DexRecontinued/releases/latest/download/out.lua"))()
+    end,
+})
+
+MainTab:Button({
+    Title = "Animation Logger",
+    Desc = "Logs animations, you can play animations that were logged and some more features.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+       loadstring(game:HttpGet("https://raw.githubusercontent.com/Serozzz/Aquatic/refs/heads/main/Anim%20Logger"))()
+    end,
+})
+
+MainTab:Button({
+    Title = "Mobile Shiftlock",
+    Desc = "Useful for mobile players.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-Mobile-Shiftlock-217580"))()
+    end,
+})
+
+MainTab:Button({
+    Title = "Simple Shaders",
+    Desc = "Simple but looks good.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-Simple-Shader-37434"))()
+    end,
+})
+
+MainTab:Button({
+    Title = "R15 To R6 Animations",
+    Desc = "Self explanatory.",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Imagnir/r6_anims_for_r15/main/r6_anims.lua", true))()
+    end,
+})
+
+MainTab:Button({
+    Title = "Cupcake's Avatar changer",
+    Desc = "If you dont have robux to buy an avatar, go into catalog avatar creator, make an avatar and save it to this script to use it for free. (Client sided.)",
+    Locked = false, -- Set true to disable clicking
+    Callback = function()
+        loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-cupcake-226375"))()
+    end,
+})
+
 
 MainTab:Divider()
 MainTab:Space()
