@@ -13,12 +13,15 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- Keep the default Roblox Backpack disabled no matter what the game does
 local RunService = game:GetService("RunService")
 
+local lastBackpackError = nil
+
 local function disableDefaultBackpack(force)
-	pcall(function()
+	local ok, err = pcall(function()
 		if force or StarterGui:GetCoreGuiEnabled(Enum.CoreGuiType.Backpack) then
 			StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 		end
 	end)
+	lastBackpackError = (not ok) and tostring(err) or nil
 end
 
 disableDefaultBackpack(true)
@@ -541,7 +544,7 @@ hideStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 hideStatusLabel.Parent = settingsPanel
 
 local backpackStatusLabel = Instance.new("TextLabel")
-backpackStatusLabel.Size = UDim2.new(1, -8, 0, 32)
+backpackStatusLabel.Size = UDim2.new(1, -8, 0, 48)
 backpackStatusLabel.BackgroundTransparency = 1
 backpackStatusLabel.Text = "Roblox hotbar flag: checking..."
 backpackStatusLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
@@ -1112,6 +1115,9 @@ local function updateBackpackStatus()
 		state = enabled and "ON (hiding failed)" or "OFF"
 	end
 	backpackStatusLabel.Text = "Roblox hotbar flag: " .. state .. " | turned back on by the game: " .. reenableCount .. "x"
+	if lastBackpackError then
+		backpackStatusLabel.Text = backpackStatusLabel.Text .. " | ERROR: " .. lastBackpackError
+	end
 end
 
 task.spawn(function()
