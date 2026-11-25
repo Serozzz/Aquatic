@@ -1,0 +1,3516 @@
+-- SANDEVISTAN v8 (Cyberpunk: Edgerunners style)
+-- LocalScript -> StarterPlayer > StarterPlayerScripts
+-- PC: Q = activate | E = ghost burst | F = fortified ankles | Z = implants menu
+-- Controller: Y = activate | X = ghost burst | B = fortified ankles | Mobile: on-screen buttons
+-- Press activate again while active to cancel early (saves Humanity).
+--
+-- NEW in v8:
+--  * GHOST BURST UPGRADES (new "GHOST BURST" tab): more clones, faster hops, shorter cooldown.
+--  * Ghost Burst path is much straighter now (BURST_ZIGZAG was 3 studs, now 1).
+--  * FORTIFIED ANKLES (new implant, "ANKLES" tab, costs points to install):
+--      - [F] on the ground = huge jump. No Sandevistan needed, it's just a jump (not a mode).
+--        Upgrading your JUMPER Sandevistan adds a little extra jump power to it.
+--      - [F] while in the air = the ankles pull you to the nearest wall you could collide with and you
+--        wall walk on it for 7 seconds (feet on the wall). Jump or press [F] again to let go.
+--      - INCREASED GRIP: brush a wall while airborne (moving toward it) and you grip it by yourself, no button,
+--        for 4.5 seconds. It re-arms when you touch the ground. (CONFIG.ANKLE_AUTO_GRIP = false turns it off.)
+--      - Two upgrades: LEG POWER (higher jump) and GRIP (longer wall walks).
+--
+-- v7: single ghost palette, menu no longer closes on outside click, earn upgrade points, Ghost Burst skill.
+-- v6: upgrades + degrading, system upgrades, shared points pool.
+-- v5: spine skeleton + implants menu (All-Rounder / Jumper / Speedster).
+-- v4: Humanity meter + Cyberpsychosis. v4.1: speed boost follows the game's own speed changes.
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local Debris = game:GetService("Debris")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+local IS_TOUCH = UIS.TouchEnabled
+
+----------------------------------------------------------------
+-- CONFIG
+----------------------------------------------------------------
+local CONFIG = {
+	-- (speed / jump / gravity multipliers live in the SANDEVISTANS table below)
+	DURATION = 8,              -- seconds active
+	COOLDOWN = 15,             -- seconds until reusable
+	ANIM_SPEED = 1.9,          -- your animation speed
+	WORLD_ANIM_SPEED = 0.15,   -- other characters' animation speed (visual slow-mo)
+
+	GHOST_SPACING = 1.1,       -- studs between afterimages (lower = denser, heavier)
+	GHOST_LIFETIME = 1.15,     -- seconds a ghost lives
+	GHOST_COLOR_EASE = 1.1,    -- >1 = colors age slower early on, so blue arrives later (1 = linear)
+	GHOST_ALPHA = 0.4,         -- ghost transparency
+	GHOST_MAX_PARTS = IS_TOUCH and 300 or 900, -- performance cap
+	GHOST_MATERIAL = Enum.Material.Neon,
+
+	FOV_BOOST = 22,
+	COLOR_CYCLE_SPEED = 7,
+
+	-- SKELETON
+	SKELETON_VERTEBRAE = 8,    -- number of vertebrae on the back
+	IMPLANT_KEY = Enum.KeyCode.Z, -- opens/closes the implants menu (PC)
+
+	-- UPGRADES
+	UPGRADE_POINTS = 30,       -- starting upgrade points (server can override with the SandevistanPoints attribute)
+	UPGRADE_COSTS = { 1, 1, 2, 2, 3 }, -- point cost of level 1, 2, 3... (its length is also the max level)
+	DRAIN_PER_POWER = 0.55,    -- extra Humanity drain per point of "power" a level adds
+	JUMP_DRAIN_WEIGHT = 0.3,   -- jump counts for only 30% as much as speed when working out power
+	HUMANITY_PER_LEVEL = 30,   -- max Humanity per level (100 + 5 x 30 = 250)
+	REGEN_PER_LEVEL = 1.2,     -- extra Humanity regen per second, per level
+	COOLDOWN_PER_LEVEL = 2.0,  -- seconds shaved off the cooldown per level
+	COOLDOWN_MIN = 5,          -- cooldown can never go below this
+
+	-- EARNING UPGRADE POINTS
+	POINTS_PER_USE = 1,        -- points for every Sandevistan use...
+	POINTS_MIN_TIME = 3,       -- ...that lasted at least this many seconds
+	POINTS_PER_BURST = 1,      -- points for a Ghost Burst that lands at least 2 teleports
+
+	-- GHOST BURST (the teleport skill)
+	BURST_KEY = Enum.KeyCode.E,
+	BURST_CLONES = 3,          -- clones planted at level 0 (fewer if walls are in the way)
+	BURST_SPACING = 9,         -- studs between clones along the path
+	BURST_ZIGZAG = 1,          -- clones alternate this many studs left / right of the center line (0 = straight)
+	BURST_MIN_STEP = 2.5,      -- a clone closer than this to the previous spot is dropped
+	BURST_STEP_UP = 2,         -- how high a step/ledge the path may climb (studs)
+	BURST_MAX_DROP = 14,       -- the biggest drop a clone may sit over (no cliffs / void)
+	BURST_BASE_INTERVAL = 0.45, -- seconds between teleports at x1 speed (divided by your Sandevistan speed)
+	BURST_PLANT_TIME = 0.35,   -- pause after planting, before the first teleport
+	BURST_COOLDOWN = 8,        -- seconds until you can burst again (level 0)
+	BURST_COST = 10,           -- Humanity cost (multiplied by the equipped Sandevistan's drain)
+	-- burst upgrades (per level)
+	BURST_CLONES_PER_LEVEL = 1,   -- +1 clone per level (3 -> 8)
+	BURST_SPEED_PER_LEVEL = 0.18, -- +18% hop speed per level
+	BURST_COOLDOWN_PER_LEVEL = 1, -- seconds shaved off the burst cooldown per level
+	BURST_COOLDOWN_MIN = 3,
+
+	-- FORTIFIED ANKLES
+	ANKLE_KEY = Enum.KeyCode.F,
+	ANKLE_INSTALL_COST = 3,    -- upgrade points to install the implant (refunded when removed)
+	ANKLE_JUMP_VELOCITY = 95,  -- upward launch speed (a normal jump is ~50). ~23 studs high
+	ANKLE_JUMP_PER_LEVEL = 10, -- extra launch speed per LEG POWER level
+	ANKLE_JUMPER_BONUS = 4,    -- extra launch speed per level of your JUMPER Sandevistan ("a little bit")
+	ANKLE_JUMP_COOLDOWN = 3,   -- seconds between ground jumps
+	ANKLE_PULL_RANGE = 45,     -- how far away the ankles can pull you to a wall (studs)
+	ANKLE_PULL_SPEED = 130,    -- studs per second while being pulled
+	ANKLE_WALL_TIME = 7,       -- seconds you can wall walk after pressing the button in the air
+	ANKLE_AUTO_GRIP = true,    -- grip walls on your own when you brush them mid-air
+	ANKLE_AUTO_TIME = 4.5,     -- seconds the automatic grip lasts
+	ANKLE_AUTO_REACH = 3,      -- how close a wall must be (in the direction you move) to auto grip
+	ANKLE_GRIP_PER_LEVEL = 0.6, -- extra wall-walk seconds per GRIP level (both kinds)
+	ANKLE_WALL_SPEED = 26,     -- walking speed on walls (studs per second)
+	ANKLE_SANDE_BOOST = 1.5,   -- wall speed multiplier while Sandevistan is active
+	ANKLE_COOLDOWN = 5,        -- seconds before you can pull to a wall again after letting go
+	ANKLE_WALL_JUMP_OUT = 45,  -- push away from the wall when you jump off it
+	ANKLE_WALL_JUMP_UP = 55,   -- ...and upward
+
+	-- HUMANITY meter (base values, before upgrades)
+	METER_MAX = 100,
+	METER_DRAIN_BASE = 6,      -- drain per second at the start of a session
+	METER_DRAIN_RAMP = 1.0,    -- extra drain per second, for every second you stay active
+	METER_ACTIVATION_COST = 8, -- instant cost when you activate
+	METER_REGEN = 3,           -- regen per second while OFF
+	METER_MIN_TO_ACTIVATE = 15,
+	METER_WARNING_FRAC = 0.25, -- below this fraction of your max the meter pulses
+
+	-- CYBERPSYCHOSIS
+	PSYCHOSIS_DURATION = 6,    -- seconds you are locked out
+	PSYCHOSIS_RECOVER_FRAC = 0.3, -- fraction of your max meter you get back after reboot
+	PSYCHOSIS_LOCKOUT = 6,     -- extra seconds before you can activate again
+	DOUBLE_DISTANCE = 5,       -- how far the 3 duplicates sit from you (studs)
+	DOUBLE_WOBBLE = 2,         -- how much that distance breathes in/out
+}
+
+-- The Sandevistans you can switch between in the implants menu.
+-- speed / jump = base multipliers at level 0 (upgrades add perLevel on top)
+-- gravity      = 1 is normal gravity, lower is floatier (only affects YOU)
+-- drain        = base Humanity drain multiplier at level 0
+-- perLevel     = what each upgrade level adds. The extra drain per level is worked out from this:
+--                (speed + jump x JUMP_DRAIN_WEIGHT) x DRAIN_PER_POWER
+--                so a jump-heavy upgrade costs far less Humanity than a speed-heavy one.
+-- (Ghost Burst hop speed uses the SPEED number, upgrades included.)
+local SANDEVISTANS = {
+	{
+		name = "ALL-ROUNDER",
+		desc = "Balanced speed and jump.",
+		speed = 2.4,
+		jump = 1.1,
+		gravity = 0.4,
+		drain = 1.0,
+		perLevel = { speed = 0.25, jump = 0.12 },
+		color = Color3.fromRGB(70, 200, 255),
+	},
+	{
+		name = "JUMPER",
+		desc = "Slower on the ground, leaps way higher.",
+		speed = 1.6,
+		jump = 1.5,
+		gravity = 0.4,
+		drain = 0.5,
+		perLevel = { speed = 0.12, jump = 0.22 },
+		color = Color3.fromRGB(255, 175, 60),
+	},
+	{
+		name = "SPEEDSTER",
+		desc = "Blazing fast, but weak jumps.",
+		speed = 3.4,
+		jump = 0.75,
+		gravity = 0.4,
+		drain = 0.95,
+		perLevel = { speed = 0.28, jump = 0.05 },
+		color = Color3.fromRGB(255, 60, 90),
+	},
+}
+
+local ANKLE_COLOR = Color3.fromRGB(90, 235, 160)
+
+-- Ghost color palette: orange-red -> purple -> blue -> teal.
+-- IMPORTANT: every palette must START on a warm color. (The old 2nd palette started on blue,
+-- which is why every other use looked like the ghosts spawned already aged. If you add more
+-- palettes, keep their first stop warm, otherwise that bug comes back.)
+local PALETTES = {
+	{
+		stops = {
+			{ t = 0.00, c = Color3.fromRGB(235, 95, 60) },
+			{ t = 0.20, c = Color3.fromRGB(210, 70, 115) },
+			{ t = 0.40, c = Color3.fromRGB(150, 50, 175) },
+			{ t = 0.65, c = Color3.fromRGB(60, 70, 230) },
+			{ t = 0.85, c = Color3.fromRGB(45, 150, 235) },
+			{ t = 1.00, c = Color3.fromRGB(50, 215, 220) },
+		},
+	},
+}
+
+local PSYCHO_PALETTE = {
+	stops = {
+		{ t = 0.00, c = Color3.fromRGB(255, 45, 75) },
+		{ t = 0.50, c = Color3.fromRGB(190, 70, 255) },
+		{ t = 1.00, c = Color3.fromRGB(60, 230, 255) },
+	},
+}
+
+-- Meter color: empty = red, mid = amber, full = cyan
+local METER_STOPS = {
+	{ t = 0.00, c = Color3.fromRGB(255, 45, 75) },
+	{ t = 0.30, c = Color3.fromRGB(255, 170, 60) },
+	{ t = 1.00, c = Color3.fromRGB(70, 200, 255) },
+}
+
+-- UI accent colors
+local COLORS = {
+	Color3.fromRGB(70, 200, 255),
+	Color3.fromRGB(255, 60, 90),
+}
+
+-- Cyberpsychosis duplicate colors + the direction each one sits in
+local DOUBLE_COLORS = {
+	Color3.fromRGB(255, 45, 75),
+	Color3.fromRGB(60, 230, 255),
+	Color3.fromRGB(190, 70, 255),
+}
+local DOUBLE_DIRS = {
+	function(cf) return cf.RightVector end,   -- right
+	function(cf) return -cf.RightVector end,  -- left
+	function(cf) return -cf.LookVector end,    -- behind
+}
+
+----------------------------------------------------------------
+-- STATE
+----------------------------------------------------------------
+local current = nil      -- active Sandevistan session
+local psycho = nil       -- active cyberpsychosis episode
+local burst = nil        -- active Ghost Burst
+local burstCooldownEnd = 0
+local burstCooldownTotal = CONFIG.BURST_COOLDOWN
+local cancelBurst        -- forward declaration (assigned in the GHOST BURST section)
+local wall = nil         -- active wall walk (fortified ankles)
+local cancelWall         -- forward declaration (assigned in the FORTIFIED ANKLES section)
+local ankleInstalled = false
+local ankleJumpEnd = 0       -- ground jump cooldown
+local ankleCooldownEnd = 0   -- wall pull cooldown
+local ankleCooldownTotal = CONFIG.ANKLE_COOLDOWN
+local autoGripReady = true   -- the automatic grip re-arms when you touch the ground
+local cooldownEnd = 0
+local paletteIndex = 1
+local implantIndex = 1   -- which Sandevistan is equipped (1 = all-rounder)
+local earnedPoints = 0   -- upgrade points earned by playing (on top of the starting points)
+-- upgrade levels: [1..3] = each Sandevistan, plus system / burst / ankle upgrades
+local levels = {
+	0, 0, 0,
+	humanity = 0, regen = 0, cooldown = 0,
+	burstClones = 0, burstSpeed = 0, burstCooldown = 0,
+	ankleJump = 0, ankleGrip = 0,
+}
+local cooldownTotal = CONFIG.COOLDOWN -- length of the cooldown currently running (for the button fill)
+local slowed = {}
+local ghostBatches = {}
+local ghostCount = 0
+local meter = CONFIG.METER_MAX
+local meterShown = meter
+
+----------------------------------------------------------------
+-- HELPERS
+----------------------------------------------------------------
+local function sampleGradient(stops, t)
+	t = math.clamp(t, 0, 1)
+	for i = 2, #stops do
+		if t <= stops[i].t then
+			local a, b = stops[i - 1], stops[i]
+			return a.c:Lerp(b.c, (t - a.t) / (b.t - a.t))
+		end
+	end
+	return stops[#stops].c
+end
+
+local function toColorSequence(stops)
+	local keys = {}
+	for _, s in ipairs(stops) do
+		table.insert(keys, ColorSequenceKeypoint.new(s.t, s.c))
+	end
+	return ColorSequence.new(keys)
+end
+
+local GLITCH_CHARS = { "#", "%", "@", "&", "$", "?", "!", "/", "|", "0", "1", "X" }
+local function corrupt(text, chance)
+	local out = {}
+	for i = 1, #text do
+		local ch = text:sub(i, i)
+		if ch ~= " " and math.random() < chance then
+			ch = GLITCH_CHARS[math.random(#GLITCH_CHARS)]
+		end
+		out[i] = ch
+	end
+	return table.concat(out)
+end
+
+local function randomNeon()
+	return DOUBLE_COLORS[math.random(#DOUBLE_COLORS)]
+end
+
+local function getImplant()
+	return SANDEVISTANS[implantIndex]
+end
+
+local MAX_LEVEL = #CONFIG.UPGRADE_COSTS
+
+local function getMeterMax()
+	return CONFIG.METER_MAX + levels.humanity * CONFIG.HUMANITY_PER_LEVEL
+end
+
+local function getRegen()
+	return CONFIG.METER_REGEN + levels.regen * CONFIG.REGEN_PER_LEVEL
+end
+
+local function getCooldown()
+	return math.max(CONFIG.COOLDOWN_MIN, CONFIG.COOLDOWN - levels.cooldown * CONFIG.COOLDOWN_PER_LEVEL)
+end
+
+-- ghost burst upgrades
+local function getBurstClones()
+	return CONFIG.BURST_CLONES + levels.burstClones * CONFIG.BURST_CLONES_PER_LEVEL
+end
+
+local function getBurstSpeedMult()
+	return 1 + levels.burstSpeed * CONFIG.BURST_SPEED_PER_LEVEL
+end
+
+local function getBurstCooldown()
+	return math.max(CONFIG.BURST_COOLDOWN_MIN, CONFIG.BURST_COOLDOWN - levels.burstCooldown * CONFIG.BURST_COOLDOWN_PER_LEVEL)
+end
+
+-- fortified ankles: launch speed grows with LEG POWER and (a little) with your Jumper Sandevistan's level
+local function getAnkleJump()
+	return CONFIG.ANKLE_JUMP_VELOCITY
+		+ levels.ankleJump * CONFIG.ANKLE_JUMP_PER_LEVEL
+		+ levels[2] * CONFIG.ANKLE_JUMPER_BONUS
+end
+
+local function getWallTime(manual)
+	local base = manual and CONFIG.ANKLE_WALL_TIME or CONFIG.ANKLE_AUTO_TIME
+	return base + levels.ankleGrip * CONFIG.ANKLE_GRIP_PER_LEVEL
+end
+
+-- speed multiplier, jump multiplier and Humanity drain multiplier for Sandevistan i at its current level
+local function getStats(i)
+	local imp = SANDEVISTANS[i]
+	local lv = levels[i]
+	local speed = imp.speed + imp.perLevel.speed * lv
+	local jump = imp.jump + imp.perLevel.jump * lv
+	local power = imp.perLevel.speed + imp.perLevel.jump * CONFIG.JUMP_DRAIN_WEIGHT
+	local drain = imp.drain + CONFIG.DRAIN_PER_POWER * power * lv
+	return speed, jump, drain
+end
+
+-- total points spent to reach `level` (levels 1..level)
+local function costTo(level)
+	local t = 0
+	for l = 1, level do
+		t += CONFIG.UPGRADE_COSTS[l]
+	end
+	return t
+end
+
+-- starting points (or the server's SandevistanPoints attribute) + points earned by playing
+local function getTotalPoints()
+	local attr = player:GetAttribute("SandevistanPoints")
+	local base = (typeof(attr) == "number") and attr or CONFIG.UPGRADE_POINTS
+	return base + earnedPoints
+end
+
+local function freePoints()
+	local spent = ankleInstalled and CONFIG.ANKLE_INSTALL_COST or 0
+	for _, lv in pairs(levels) do
+		spent += costTo(lv)
+	end
+	return getTotalPoints() - spent
+end
+
+-- seconds a FULL humanity meter lasts with this drain multiplier
+-- (drain per second = (base + ramp x t) x mult, so we solve the quadratic)
+local function timeToEmpty(mult)
+	local avail = math.max(0, getMeterMax() - CONFIG.METER_ACTIVATION_COST * mult)
+	local b = CONFIG.METER_DRAIN_BASE * mult
+	local a = CONFIG.METER_DRAIN_RAMP * mult / 2
+	if a <= 0 then
+		return avail / b
+	end
+	return (-b + math.sqrt(b * b + 4 * a * avail)) / (2 * a)
+end
+
+local function getTorso(char)
+	return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+end
+
+-- Turns the default movement controls (keyboard / thumbstick / gamepad) on or off
+local function setControlsEnabled(on)
+	pcall(function()
+		local ps = player:FindFirstChild("PlayerScripts")
+		local module = ps and ps:FindFirstChild("PlayerModule")
+		if not module then return end
+		local controls = require(module):GetControls()
+		if on then controls:Enable() else controls:Disable() end
+	end)
+end
+
+----------------------------------------------------------------
+-- LIGHTING EFFECTS
+----------------------------------------------------------------
+local cc = Instance.new("ColorCorrectionEffect")
+cc.Name = "SandevistanCC"
+cc.Parent = Lighting
+
+local blur = Instance.new("BlurEffect")
+blur.Name = "SandevistanBlur"
+blur.Size = 0
+blur.Parent = Lighting
+
+local bloom = Instance.new("BloomEffect")
+bloom.Name = "SandevistanBloom"
+bloom.Intensity = 0
+bloom.Size = 24
+bloom.Threshold = 2
+bloom.Parent = Lighting
+
+local ghostFolder = Instance.new("Folder")
+ghostFolder.Name = "SandevistanGhosts"
+ghostFolder.Parent = camera
+
+----------------------------------------------------------------
+-- UI
+----------------------------------------------------------------
+local gui = Instance.new("ScreenGui")
+gui.Name = "SandevistanUI"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 10
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local edges = {}
+local function makeEdge(pos, size, rotation)
+	local f = Instance.new("Frame")
+	f.BorderSizePixel = 0
+	f.BackgroundColor3 = COLORS[2]
+	f.BackgroundTransparency = 1
+	f.Position = pos
+	f.Size = size
+	f.Active = false
+	f.ZIndex = 0
+	local g = Instance.new("UIGradient")
+	g.Rotation = rotation
+	g.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.4),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	g.Parent = f
+	f.Parent = gui
+	table.insert(edges, f)
+end
+makeEdge(UDim2.fromScale(0, 0), UDim2.fromScale(1, 0.22), 90)
+makeEdge(UDim2.fromScale(0, 0.78), UDim2.fromScale(1, 0.22), 270)
+makeEdge(UDim2.fromScale(0, 0), UDim2.fromScale(0.14, 1), 0)
+makeEdge(UDim2.fromScale(0.86, 0), UDim2.fromScale(0.14, 1), 180)
+
+local title = Instance.new("TextLabel")
+title.AnchorPoint = Vector2.new(0.5, 0.5)
+title.Position = UDim2.fromScale(0.5, 0.2)
+title.Size = UDim2.fromOffset(500, 60)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.SciFi
+title.TextSize = 42
+title.TextTransparency = 1
+title.Text = ""
+title.ZIndex = 30
+title.Parent = gui
+local titleStroke = Instance.new("UIStroke")
+titleStroke.Thickness = 2
+titleStroke.Transparency = 1
+titleStroke.Color = Color3.new(0, 0, 0)
+titleStroke.Parent = title
+
+local button = Instance.new("TextButton")
+button.Name = "SandevistanButton"
+button.AnchorPoint = Vector2.new(0.5, 1)
+button.Size = UDim2.fromOffset(84, 84)
+button.Position = IS_TOUCH and UDim2.new(1, -190, 1, -50) or UDim2.new(0.5, 0, 1, -30)
+button.BackgroundColor3 = Color3.fromRGB(8, 8, 18)
+button.BackgroundTransparency = 0.15
+button.AutoButtonColor = false
+button.Text = ""
+button.ClipsDescendants = true
+button.Parent = gui
+Instance.new("UICorner", button).CornerRadius = UDim.new(1, 0)
+
+local stroke = Instance.new("UIStroke")
+stroke.Thickness = 3
+stroke.Color = COLORS[1]
+stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+stroke.Parent = button
+
+local fill = Instance.new("Frame")
+fill.AnchorPoint = Vector2.new(0, 1)
+fill.Position = UDim2.fromScale(0, 1)
+fill.Size = UDim2.fromScale(1, 1)
+fill.BackgroundColor3 = COLORS[1]
+fill.BackgroundTransparency = 0.55
+fill.BorderSizePixel = 0
+fill.Parent = button
+
+local label = Instance.new("TextLabel")
+label.Size = UDim2.fromScale(1, 1)
+label.BackgroundTransparency = 1
+label.Font = Enum.Font.SciFi
+label.TextSize = 30
+label.TextColor3 = Color3.new(1, 1, 1)
+label.Text = "⚡"
+label.ZIndex = 3
+label.Parent = button
+local labelStroke = Instance.new("UIStroke")
+labelStroke.Thickness = 1.5
+labelStroke.Color = Color3.new(0, 0, 0)
+labelStroke.Parent = label
+
+---------------- GHOST BURST BUTTON ----------------
+local burstButton = Instance.new("TextButton")
+burstButton.Name = "BurstButton"
+burstButton.AnchorPoint = Vector2.new(0.5, 1)
+burstButton.Size = UDim2.fromOffset(62, 62)
+burstButton.Position = IS_TOUCH and UDim2.new(1, -285, 1, -50) or UDim2.new(0.5, 92, 1, -30)
+burstButton.BackgroundColor3 = Color3.fromRGB(8, 8, 18)
+burstButton.BackgroundTransparency = 0.15
+burstButton.AutoButtonColor = false
+burstButton.Text = ""
+burstButton.ClipsDescendants = true
+burstButton.Parent = gui
+Instance.new("UICorner", burstButton).CornerRadius = UDim.new(1, 0)
+
+local burstStroke = Instance.new("UIStroke")
+burstStroke.Thickness = 3
+burstStroke.Color = COLORS[1]
+burstStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+burstStroke.Parent = burstButton
+
+local burstFill = Instance.new("Frame")
+burstFill.AnchorPoint = Vector2.new(0, 1)
+burstFill.Position = UDim2.fromScale(0, 1)
+burstFill.Size = UDim2.fromScale(1, 1)
+burstFill.BackgroundColor3 = COLORS[1]
+burstFill.BackgroundTransparency = 0.55
+burstFill.BorderSizePixel = 0
+burstFill.Parent = burstButton
+
+local burstLabel = Instance.new("TextLabel")
+burstLabel.Size = UDim2.fromScale(1, 1)
+burstLabel.BackgroundTransparency = 1
+burstLabel.Font = Enum.Font.SciFi
+burstLabel.TextSize = 24
+burstLabel.TextColor3 = Color3.new(1, 1, 1)
+burstLabel.Text = IS_TOUCH and ">>" or "E"
+burstLabel.ZIndex = 3
+burstLabel.Parent = burstButton
+local burstLabelStroke = Instance.new("UIStroke")
+burstLabelStroke.Thickness = 1.5
+burstLabelStroke.Color = Color3.new(0, 0, 0)
+burstLabelStroke.Parent = burstLabel
+
+---------------- FORTIFIED ANKLES BUTTON ----------------
+local ankleButton = Instance.new("TextButton")
+ankleButton.Name = "AnkleButton"
+ankleButton.AnchorPoint = Vector2.new(0.5, 1)
+ankleButton.Size = UDim2.fromOffset(62, 62)
+ankleButton.Position = IS_TOUCH and UDim2.new(1, -285, 1, -122) or UDim2.new(0.5, -92, 1, -30)
+ankleButton.BackgroundColor3 = Color3.fromRGB(8, 8, 18)
+ankleButton.BackgroundTransparency = 0.15
+ankleButton.AutoButtonColor = false
+ankleButton.Text = ""
+ankleButton.ClipsDescendants = true
+ankleButton.Parent = gui
+Instance.new("UICorner", ankleButton).CornerRadius = UDim.new(1, 0)
+
+local ankleStroke = Instance.new("UIStroke")
+ankleStroke.Thickness = 3
+ankleStroke.Color = ANKLE_COLOR
+ankleStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+ankleStroke.Parent = ankleButton
+
+local ankleFill = Instance.new("Frame")
+ankleFill.AnchorPoint = Vector2.new(0, 1)
+ankleFill.Position = UDim2.fromScale(0, 1)
+ankleFill.Size = UDim2.fromScale(1, 1)
+ankleFill.BackgroundColor3 = ANKLE_COLOR
+ankleFill.BackgroundTransparency = 0.55
+ankleFill.BorderSizePixel = 0
+ankleFill.Parent = ankleButton
+
+local ankleLabel = Instance.new("TextLabel")
+ankleLabel.Size = UDim2.fromScale(1, 1)
+ankleLabel.BackgroundTransparency = 1
+ankleLabel.Font = Enum.Font.SciFi
+ankleLabel.TextSize = 24
+ankleLabel.TextColor3 = Color3.new(1, 1, 1)
+ankleLabel.Text = IS_TOUCH and "^^" or "F"
+ankleLabel.ZIndex = 3
+ankleLabel.Parent = ankleButton
+local ankleLabelStroke = Instance.new("UIStroke")
+ankleLabelStroke.Thickness = 1.5
+ankleLabelStroke.Color = Color3.new(0, 0, 0)
+ankleLabelStroke.Parent = ankleLabel
+
+if not IS_TOUCH then
+	local hint = Instance.new("TextLabel")
+	hint.AnchorPoint = Vector2.new(0.5, 1)
+	hint.Position = UDim2.new(0.5, 0, 1, -118)
+	hint.Size = UDim2.fromOffset(700, 18)
+	hint.BackgroundTransparency = 1
+	hint.Font = Enum.Font.SciFi
+	hint.TextSize = 14
+	hint.TextColor3 = COLORS[1]
+	hint.Text = "SANDEVISTAN [Q]   •   GHOST BURST [E]   •   ANKLES [F]   •   IMPLANTS [Z]"
+	hint.Parent = gui
+end
+
+---------------- "+1 POINT" TOAST ----------------
+local pointToast = Instance.new("TextLabel")
+pointToast.AnchorPoint = Vector2.new(1, 0)
+pointToast.Position = UDim2.new(1, -14, 0, 98)
+pointToast.TextXAlignment = Enum.TextXAlignment.Right
+pointToast.Size = UDim2.fromOffset(380, 22)
+pointToast.BackgroundTransparency = 1
+pointToast.Font = Enum.Font.SciFi
+pointToast.TextSize = 16
+pointToast.TextColor3 = COLORS[1]
+pointToast.TextTransparency = 1
+pointToast.Text = ""
+pointToast.ZIndex = 30
+pointToast.Parent = gui
+local pointToastStroke = Instance.new("UIStroke")
+pointToastStroke.Thickness = 1.5
+pointToastStroke.Transparency = 1
+pointToastStroke.Color = Color3.new(0, 0, 0)
+pointToastStroke.Parent = pointToast
+
+local toastToken = 0
+local function showToast(text)
+	toastToken += 1
+	local mine = toastToken
+	pointToast.Text = text
+	pointToast.TextTransparency = 0
+	pointToastStroke.Transparency = 0
+	pointToast.Position = UDim2.new(1, -14, 0, 108)
+	TweenService:Create(
+		pointToast,
+		TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = UDim2.new(1, -14, 0, 98) }
+	):Play()
+	task.delay(1.8, function()
+		if mine ~= toastToken then return end
+		TweenService:Create(pointToast, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
+		TweenService:Create(pointToastStroke, TweenInfo.new(0.6), { Transparency = 1 }):Play()
+	end)
+end
+
+---------------- HUMANITY METER (left side) ----------------
+local BAR_W = IS_TOUCH and 26 or 34
+local BAR_H = IS_TOUCH and 200 or 290
+
+local meterRoot = Instance.new("Frame")
+meterRoot.Name = "HumanityMeter"
+meterRoot.AnchorPoint = Vector2.new(0, 0.5)
+meterRoot.Position = UDim2.new(0, 22, 0.5, 0)
+meterRoot.Size = UDim2.fromOffset(110, BAR_H + 52)
+meterRoot.BackgroundTransparency = 1
+meterRoot.Parent = gui
+
+local meterTitle = Instance.new("TextLabel")
+meterTitle.Size = UDim2.fromOffset(110, 18)
+meterTitle.BackgroundTransparency = 1
+meterTitle.Font = Enum.Font.SciFi
+meterTitle.TextSize = 14
+meterTitle.TextXAlignment = Enum.TextXAlignment.Left
+meterTitle.TextColor3 = COLORS[1]
+meterTitle.Text = "HUMANITY"
+meterTitle.Parent = meterRoot
+
+local meterBar = Instance.new("Frame")
+meterBar.Position = UDim2.fromOffset(0, 22)
+meterBar.Size = UDim2.fromOffset(BAR_W, BAR_H)
+meterBar.BackgroundColor3 = Color3.fromRGB(8, 8, 18)
+meterBar.BackgroundTransparency = 0.25
+meterBar.BorderSizePixel = 0
+meterBar.ClipsDescendants = true
+meterBar.Parent = meterRoot
+Instance.new("UICorner", meterBar).CornerRadius = UDim.new(0, 6)
+
+local meterStroke = Instance.new("UIStroke")
+meterStroke.Thickness = 2
+meterStroke.Color = COLORS[1]
+meterStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+meterStroke.Parent = meterBar
+
+local meterFill = Instance.new("Frame")
+meterFill.AnchorPoint = Vector2.new(0, 1)
+meterFill.Position = UDim2.fromScale(0, 1)
+meterFill.Size = UDim2.fromScale(1, 1)
+meterFill.BackgroundColor3 = COLORS[1]
+meterFill.BackgroundTransparency = 0.15
+meterFill.BorderSizePixel = 0
+meterFill.Parent = meterBar
+
+for _, frac in ipairs({ 0.25, 0.5, 0.75 }) do
+	local tick = Instance.new("Frame")
+	tick.AnchorPoint = Vector2.new(0, 0.5)
+	tick.Position = UDim2.fromScale(0, 1 - frac)
+	tick.Size = UDim2.new(1, 0, 0, 2)
+	tick.BackgroundColor3 = Color3.new(1, 1, 1)
+	tick.BackgroundTransparency = 0.65
+	tick.BorderSizePixel = 0
+	tick.ZIndex = 3
+	tick.Parent = meterBar
+end
+
+local meterValue = Instance.new("TextLabel")
+meterValue.Position = UDim2.fromOffset(0, BAR_H + 26)
+meterValue.Size = UDim2.fromOffset(110, 20)
+meterValue.BackgroundTransparency = 1
+meterValue.Font = Enum.Font.SciFi
+meterValue.TextSize = 16
+meterValue.TextXAlignment = Enum.TextXAlignment.Left
+meterValue.TextColor3 = COLORS[1]
+meterValue.Text = "100%"
+meterValue.Parent = meterRoot
+
+---------------- CYBERPSYCHOSIS UI ----------------
+local glitchLayer = Instance.new("Frame")
+glitchLayer.Name = "GlitchLayer"
+glitchLayer.Size = UDim2.fromScale(1, 1)
+glitchLayer.BackgroundTransparency = 1
+glitchLayer.BorderSizePixel = 0
+glitchLayer.ZIndex = 6
+glitchLayer.Parent = gui
+
+local redFlash = Instance.new("Frame")
+redFlash.Size = UDim2.fromScale(1, 1)
+redFlash.BackgroundColor3 = Color3.fromRGB(255, 30, 60)
+redFlash.BackgroundTransparency = 1
+redFlash.BorderSizePixel = 0
+redFlash.ZIndex = 5
+redFlash.Parent = glitchLayer
+
+local bars = {}
+for i = 1, 9 do
+	local bar = Instance.new("Frame")
+	bar.BorderSizePixel = 0
+	bar.BackgroundTransparency = 1
+	bar.Size = UDim2.new(1, 0, 0, 10)
+	bar.ZIndex = 6
+	bar.Parent = glitchLayer
+	table.insert(bars, bar)
+end
+
+local psychTitle = Instance.new("TextLabel")
+psychTitle.AnchorPoint = Vector2.new(0.5, 0.5)
+psychTitle.Position = UDim2.fromScale(0.5, 0.24)
+psychTitle.Size = UDim2.fromOffset(700, 70)
+psychTitle.BackgroundTransparency = 1
+psychTitle.Font = Enum.Font.SciFi
+psychTitle.TextSize = IS_TOUCH and 34 or 54
+psychTitle.TextColor3 = COLORS[2]
+psychTitle.TextTransparency = 1
+psychTitle.Text = "CYBERPSYCHOSIS"
+psychTitle.ZIndex = 8
+psychTitle.Parent = gui
+local psychStroke = Instance.new("UIStroke")
+psychStroke.Thickness = 2.5
+psychStroke.Transparency = 1
+psychStroke.Color = Color3.new(0, 0, 0)
+psychStroke.Parent = psychTitle
+
+local psychSub = Instance.new("TextLabel")
+psychSub.AnchorPoint = Vector2.new(0.5, 0.5)
+psychSub.Position = UDim2.fromScale(0.5, 0.31)
+psychSub.Size = UDim2.fromOffset(500, 30)
+psychSub.BackgroundTransparency = 1
+psychSub.Font = Enum.Font.SciFi
+psychSub.TextSize = IS_TOUCH and 16 or 22
+psychSub.TextColor3 = Color3.fromRGB(255, 255, 255)
+psychSub.TextTransparency = 1
+psychSub.Text = ""
+psychSub.ZIndex = 8
+psychSub.Parent = gui
+local psychSubStroke = Instance.new("UIStroke")
+psychSubStroke.Thickness = 1.5
+psychSubStroke.Transparency = 1
+psychSubStroke.Color = Color3.new(0, 0, 0)
+psychSubStroke.Parent = psychSub
+
+local function hidePsychUI()
+	psychTitle.TextTransparency = 1
+	psychStroke.Transparency = 1
+	psychSub.TextTransparency = 1
+	psychSubStroke.Transparency = 1
+	redFlash.BackgroundTransparency = 1
+	for _, bar in ipairs(bars) do
+		bar.BackgroundTransparency = 1
+	end
+end
+
+local function glitchBars()
+	for _, bar in ipairs(bars) do
+		if math.random() < 0.65 then
+			bar.Position = UDim2.new(math.random() * 0.3 - 0.15, 0, math.random(), 0)
+			bar.Size = UDim2.new(1, 0, 0, math.random(4, 42))
+			bar.BackgroundColor3 = randomNeon()
+			bar.BackgroundTransparency = 0.55 + math.random() * 0.35
+		else
+			bar.BackgroundTransparency = 1
+		end
+	end
+end
+
+----------------------------------------------------------------
+-- EFFECT HELPERS
+----------------------------------------------------------------
+local function setEffects(on, baseFov, t)
+	local info = TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(cc, info, {
+		TintColor = on and Color3.fromRGB(190, 225, 255) or Color3.new(1, 1, 1),
+		Saturation = on and -0.3 or 0,
+		Contrast = on and 0.2 or 0,
+		Brightness = on and -0.04 or 0,
+	}):Play()
+	TweenService:Create(blur, info, { Size = on and 4 or 0 }):Play()
+	TweenService:Create(bloom, info, {
+		Intensity = on and 0.8 or 0,
+		Threshold = on and 0.9 or 2,
+	}):Play()
+	TweenService:Create(camera, info, {
+		FieldOfView = on and (baseFov + CONFIG.FOV_BOOST) or baseFov,
+	}):Play()
+	for _, f in ipairs(edges) do
+		TweenService:Create(f, info, { BackgroundTransparency = on and 0 or 1 }):Play()
+	end
+end
+
+local function flashTitle(text, color)
+	title.Text = text
+	title.TextTransparency = 0
+	titleStroke.Transparency = 0
+	task.spawn(function()
+		for i = 1, 8 do
+			title.Position = UDim2.new(0.5, math.random(-12, 12), 0.2, math.random(-6, 6))
+			title.TextColor3 = (i % 2 == 0) and COLORS[1] or COLORS[2]
+			task.wait(0.04)
+		end
+		title.Position = UDim2.fromScale(0.5, 0.2)
+		title.TextColor3 = color
+		TweenService:Create(title, TweenInfo.new(0.8), { TextTransparency = 1 }):Play()
+		TweenService:Create(titleStroke, TweenInfo.new(0.8), { Transparency = 1 }):Play()
+	end)
+end
+
+local function shake(humanoid, amp, dur)
+	task.spawn(function()
+		local t = os.clock()
+		while os.clock() - t < dur do
+			local k = 1 - (os.clock() - t) / dur
+			if humanoid.Parent then
+				humanoid.CameraOffset = Vector3.new((math.random() - 0.5) * amp * k, (math.random() - 0.5) * amp * k, 0)
+			end
+			RunService.RenderStepped:Wait()
+		end
+		if humanoid.Parent then
+			humanoid.CameraOffset = Vector3.zero
+		end
+	end)
+end
+
+local function setAnimSpeed(humanoid, speed)
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then return end
+	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+		track:AdjustSpeed(speed)
+	end
+end
+
+local function shockwave(pos, palette, scale)
+	scale = scale or 1
+	local info = TweenInfo.new(0.7, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	local stops = palette.stops
+
+	local ring = Instance.new("Part")
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Size = Vector3.new(0.3, 2, 2)
+	ring.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanTouch = false
+	ring.CanQuery = false
+	ring.Material = Enum.Material.Neon
+	ring.Color = stops[1].c
+	ring.Transparency = 0.2
+	ring.Parent = ghostFolder
+	TweenService:Create(ring, info, {
+		Size = Vector3.new(0.3, 50 * scale, 50 * scale),
+		Transparency = 1,
+		Color = stops[#stops].c,
+	}):Play()
+	Debris:AddItem(ring, 0.8)
+
+	local sphere = Instance.new("Part")
+	sphere.Shape = Enum.PartType.Ball
+	sphere.Size = Vector3.new(2, 2, 2)
+	sphere.CFrame = CFrame.new(pos + Vector3.new(0, 2, 0))
+	sphere.Anchored = true
+	sphere.CanCollide = false
+	sphere.CanTouch = false
+	sphere.CanQuery = false
+	sphere.Material = Enum.Material.Neon
+	sphere.Color = stops[2].c
+	sphere.Transparency = 0.5
+	sphere.Parent = ghostFolder
+	TweenService:Create(sphere, info, {
+		Size = Vector3.new(34 * scale, 34 * scale, 34 * scale),
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(sphere, 0.8)
+end
+
+-- small expanding neon ball (used for wall grips, where a flat ring would cut into the wall)
+local function wallPulse(pos, scale)
+	local ball = Instance.new("Part")
+	ball.Shape = Enum.PartType.Ball
+	ball.Size = Vector3.new(1, 1, 1)
+	ball.CFrame = CFrame.new(pos)
+	ball.Anchored = true
+	ball.CanCollide = false
+	ball.CanTouch = false
+	ball.CanQuery = false
+	ball.CastShadow = false
+	ball.Material = Enum.Material.Neon
+	ball.Color = ANKLE_COLOR
+	ball.Transparency = 0.35
+	ball.Parent = ghostFolder
+	TweenService:Create(
+		ball,
+		TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+		{ Size = Vector3.new(16, 16, 16) * (scale or 1), Transparency = 1 }
+	):Play()
+	Debris:AddItem(ball, 0.5)
+end
+
+----------------------------------------------------------------
+-- SKELETON IMPLANT
+-- A spine rig on your back. Idle: dark metal with a faint glow in your implant color.
+-- Active: ribs unfold from the bottom up and a light wave runs up the vertebrae.
+-- Cyberpsychosis: everything strobes and the ribs spasm.
+----------------------------------------------------------------
+local skeleton = nil
+
+local function destroySkeleton()
+	if skeleton and skeleton.folder then
+		skeleton.folder:Destroy()
+	end
+	skeleton = nil
+end
+
+-- ribs fold down along the spine (ol = 0) and swing out/back like wings (ol = 1)
+local function poseRib(r, ol)
+	local yaw = -r.side * ol * 1.0
+	local roll = r.side * (-1.25 + ol * 1.45)
+	r.weld.C0 = CFrame.new(r.side * r.px, r.y, r.z)
+		* CFrame.Angles(0, yaw, roll)
+		* CFrame.new(r.side * r.L / 2, 0, 0)
+end
+
+local function buildSkeleton(char)
+	destroySkeleton()
+
+	-- R15 loads in pieces, so wait briefly for the torso
+	local torso = getTorso(char)
+	local t0 = os.clock()
+	while not torso and os.clock() - t0 < 5 and char.Parent do
+		task.wait(0.1)
+		torso = getTorso(char)
+	end
+	if not torso or not char.Parent or player.Character ~= char then return end
+
+	local imp = getImplant()
+	local dim = imp.color:Lerp(Color3.new(0, 0, 0), 0.78)
+	local METAL = Color3.fromRGB(26, 28, 36)
+
+	local folder = Instance.new("Folder")
+	folder.Name = "SandevistanSkeleton"
+
+	local H = torso.Size.Y
+	local backZ = torso.Size.Z / 2
+	local count = CONFIG.SKELETON_VERTEBRAE
+	local y0, y1 = -H / 2 + 0.25, H / 2 - 0.2
+
+	local sk = { folder = folder, verts = {}, ribs = {}, open = 0, wasOpen = false, flash = 0 }
+
+	local function newPart(name, size, color, material)
+		local p = Instance.new("Part")
+		p.Name = name
+		p.Size = size
+		p.Color = color
+		p.Material = material
+		p.Anchored = false
+		p.CanCollide = false
+		p.CanTouch = false
+		p.CanQuery = false
+		p.Massless = true
+		p.CastShadow = false
+		p:SetAttribute("NoGhost", true) -- keeps it out of afterimages/duplicates
+		p.Parent = folder
+		return p
+	end
+
+	local function weld(part, c0)
+		local w = Instance.new("Weld")
+		w.Part0 = torso
+		w.Part1 = part
+		w.C0 = c0
+		w.Parent = part
+		return w
+	end
+
+	-- glowing core line running down the spine
+	local core = newPart("Core", Vector3.new(0.12, (y1 - y0) + 0.25, 0.08), dim, Enum.Material.Neon)
+	weld(core, CFrame.new(0, (y0 + y1) / 2, backZ + 0.34))
+	sk.core = core
+
+	local light = Instance.new("PointLight")
+	light.Range = 10
+	light.Brightness = 0
+	light.Shadows = false
+	light.Color = imp.color
+	light.Parent = core
+	sk.light = light
+
+	-- vertebrae (wide at the bottom, narrow at the top) + glow bands + ribs
+	for i = 1, count do
+		local a = (i - 1) / math.max(1, count - 1) -- 0 = bottom, 1 = top
+		local y = y0 + (y1 - y0) * a
+		local w = 0.78 - 0.34 * a
+
+		local v = newPart("Vertebra" .. i, Vector3.new(w, 0.3, 0.28), METAL, Enum.Material.Metal)
+		weld(v, CFrame.new(0, y, backZ + 0.17))
+
+		local band = newPart("Band" .. i, Vector3.new(w * 0.7, 0.07, 0.34), dim, Enum.Material.Neon)
+		weld(band, CFrame.new(0, y, backZ + 0.17))
+		table.insert(sk.verts, { band = band, a = a })
+
+		local L = 0.5 + 0.6 * math.sin(a * math.pi) -- ribs are longest mid-spine
+		for _, side in ipairs({ 1, -1 }) do
+			local rib = newPart("Rib", Vector3.new(L, 0.09, 0.09), dim, Enum.Material.Neon)
+			local r = {
+				part = rib,
+				weld = weld(rib, CFrame.new()),
+				side = side,
+				px = w / 2 - 0.04,
+				y = y,
+				z = backZ + 0.17,
+				L = L,
+				a = a,
+			}
+			poseRib(r, 0)
+			table.insert(sk.ribs, r)
+		end
+	end
+
+	folder.Parent = char
+	skeleton = sk
+end
+
+local function updateSkeleton(now, dt)
+	local sk = skeleton
+	if not sk or not sk.folder.Parent then return end
+
+	local imp = getImplant()
+	local activeLike = (current ~= nil) or (psycho ~= nil)
+	local target = activeLike and 1 or 0
+	sk.open += (target - sk.open) * math.min(1, dt * (activeLike and 6 or 3))
+	local open = sk.open
+	sk.flash = math.max(0, sk.flash - dt * 1.4)
+
+	local dim = imp.color:Lerp(Color3.new(0, 0, 0), 0.78)
+	local palette = current and current.palette or nil
+
+	local function glowAt(a)
+		if psycho then
+			return (math.random() < 0.5) and randomNeon() or dim
+		elseif palette then
+			return sampleGradient(palette.stops, (math.sin(now * 2 + a * 4) + 1) / 2)
+		end
+		return imp.color
+	end
+
+	-- vertebra glow bands: a wave of light travels up the spine
+	for _, v in ipairs(sk.verts) do
+		local wave = (math.sin(now * 6 - v.a * 7) + 1) / 2
+		local strength = open * (0.4 + 0.6 * wave)
+		local idle = (0.22 + 0.12 * math.sin(now * 1.6 - v.a * 3)) * (1 - open)
+		local k = math.max(strength, idle, sk.flash * wave)
+		v.band.Color = dim:Lerp(glowAt(v.a), k)
+	end
+
+	-- ribs unfold from the bottom up
+	local moving = open > 0.002 or sk.wasOpen
+	sk.wasOpen = open > 0.002
+	if moving then
+		for _, r in ipairs(sk.ribs) do
+			local ol = math.clamp(open * 1.5 - r.a * 0.5, 0, 1)
+			if open > 0.3 then
+				ol = math.clamp(ol + math.sin(now * 9 + r.a * 6 + r.side) * 0.05, 0, 1)
+			end
+			if psycho then
+				ol = math.clamp(ol + (math.random() - 0.5) * 0.5, 0, 1)
+			end
+			poseRib(r, ol)
+			r.part.Color = dim:Lerp(glowAt(r.a), ol * 0.9)
+		end
+	end
+
+	-- core line + light
+	local coreK = math.max(open, 0.2 + 0.1 * math.sin(now * 2), sk.flash)
+	local coreColor = glowAt(0.5)
+	sk.core.Color = dim:Lerp(coreColor, coreK)
+	sk.light.Color = coreColor
+	sk.light.Brightness = open * (1.2 + 0.6 * math.max(0, math.sin(now * 11)))
+end
+
+----------------------------------------------------------------
+-- IMPLANTS MENU (equip, upgrade and degrade)
+-- It only closes with the X, the Z key or the IMPLANTS button. Clicking outside does nothing.
+----------------------------------------------------------------
+local implantButton = Instance.new("TextButton")
+implantButton.Name = "ImplantsButton"
+implantButton.AnchorPoint = Vector2.new(1, 0)
+implantButton.Size = UDim2.fromOffset(124, 44)
+implantButton.Position = UDim2.new(1, -14, 0, 46) -- top right, just below the corner
+implantButton.BackgroundColor3 = Color3.fromRGB(8, 8, 18)
+implantButton.BackgroundTransparency = 0.15
+implantButton.AutoButtonColor = false
+implantButton.Text = ""
+implantButton.Parent = gui
+Instance.new("UICorner", implantButton).CornerRadius = UDim.new(0, 10)
+
+local implantStroke = Instance.new("UIStroke")
+implantStroke.Thickness = 2
+implantStroke.Color = COLORS[1]
+implantStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+implantStroke.Parent = implantButton
+
+local implantTop = Instance.new("TextLabel")
+implantTop.Position = UDim2.fromOffset(0, 4)
+implantTop.Size = UDim2.new(1, 0, 0, 20)
+implantTop.BackgroundTransparency = 1
+implantTop.Font = Enum.Font.SciFi
+implantTop.TextSize = 15
+implantTop.TextColor3 = Color3.new(1, 1, 1)
+implantTop.Text = "IMPLANTS"
+implantTop.Parent = implantButton
+
+local implantSub = Instance.new("TextLabel")
+implantSub.Position = UDim2.fromOffset(0, 23)
+implantSub.Size = UDim2.new(1, 0, 0, 16)
+implantSub.BackgroundTransparency = 1
+implantSub.Font = Enum.Font.SciFi
+implantSub.TextSize = 11
+implantSub.TextColor3 = getImplant().color
+implantSub.Text = getImplant().name
+implantSub.Parent = implantButton
+
+-- badge showing unspent upgrade points
+local implantBadge = Instance.new("TextLabel")
+implantBadge.AnchorPoint = Vector2.new(1, 0.5)
+implantBadge.Position = UDim2.new(1, 8, 0, 4)
+implantBadge.Size = UDim2.fromOffset(34, 18)
+implantBadge.BackgroundColor3 = COLORS[2]
+implantBadge.Font = Enum.Font.SciFi
+implantBadge.TextSize = 11
+implantBadge.TextColor3 = Color3.new(1, 1, 1)
+implantBadge.Text = ""
+implantBadge.Visible = false
+implantBadge.ZIndex = 3
+implantBadge.Parent = implantButton
+Instance.new("UICorner", implantBadge).CornerRadius = UDim.new(0, 9)
+
+-- panel
+local panel = Instance.new("Frame")
+panel.Name = "ImplantsPanel"
+panel.AnchorPoint = Vector2.new(0.5, 0.5)
+panel.Position = UDim2.fromScale(0.5, 0.52)
+panel.Size = UDim2.new(0, IS_TOUCH and 340 or 400, 0.86, 0)
+panel.BackgroundColor3 = Color3.fromRGB(8, 9, 18)
+panel.BackgroundTransparency = 0.04
+panel.Visible = false
+panel.ZIndex = 20
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
+
+local panelLimit = Instance.new("UISizeConstraint")
+panelLimit.MinSize = Vector2.new(300, 260)
+panelLimit.MaxSize = Vector2.new(400, 500)
+panelLimit.Parent = panel
+
+local panelScale = Instance.new("UIScale")
+panelScale.Parent = panel
+
+local panelStroke = Instance.new("UIStroke")
+panelStroke.Thickness = 2
+panelStroke.Color = COLORS[1]
+panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+panelStroke.Parent = panel
+
+local panelTitle = Instance.new("TextLabel")
+panelTitle.Position = UDim2.fromOffset(18, 10)
+panelTitle.Size = UDim2.fromOffset(220, 28)
+panelTitle.BackgroundTransparency = 1
+panelTitle.Font = Enum.Font.SciFi
+panelTitle.TextSize = 24
+panelTitle.TextXAlignment = Enum.TextXAlignment.Left
+panelTitle.TextColor3 = COLORS[1]
+panelTitle.Text = "IMPLANTS"
+panelTitle.Parent = panel
+
+local panelSub = Instance.new("TextLabel")
+panelSub.Position = UDim2.fromOffset(18, 38)
+panelSub.Size = UDim2.new(1, -150, 0, 16)
+panelSub.BackgroundTransparency = 1
+panelSub.Font = Enum.Font.SciFi
+panelSub.TextSize = 12
+panelSub.TextXAlignment = Enum.TextXAlignment.Left
+panelSub.TextColor3 = Color3.fromRGB(150, 160, 185)
+panelSub.Text = ""
+panelSub.Parent = panel
+
+-- upgrade points box (top right, left of the close button)
+local pointsCaption = Instance.new("TextLabel")
+pointsCaption.AnchorPoint = Vector2.new(1, 0)
+pointsCaption.Position = UDim2.new(1, -52, 0, 8)
+pointsCaption.Size = UDim2.fromOffset(80, 12)
+pointsCaption.BackgroundTransparency = 1
+pointsCaption.Font = Enum.Font.SciFi
+pointsCaption.TextSize = 10
+pointsCaption.TextXAlignment = Enum.TextXAlignment.Right
+pointsCaption.TextColor3 = Color3.fromRGB(150, 160, 185)
+pointsCaption.Text = "UPGRADE POINTS"
+pointsCaption.Parent = panel
+
+local pointsNum = Instance.new("TextLabel")
+pointsNum.AnchorPoint = Vector2.new(1, 0)
+pointsNum.Position = UDim2.new(1, -52, 0, 20)
+pointsNum.Size = UDim2.fromOffset(80, 26)
+pointsNum.BackgroundTransparency = 1
+pointsNum.Font = Enum.Font.SciFi
+pointsNum.TextSize = 24
+pointsNum.TextXAlignment = Enum.TextXAlignment.Right
+pointsNum.TextColor3 = COLORS[1]
+pointsNum.Text = "0"
+pointsNum.Parent = panel
+
+local closeButton = Instance.new("TextButton")
+closeButton.AnchorPoint = Vector2.new(1, 0)
+closeButton.Position = UDim2.new(1, -10, 0, 10)
+closeButton.Size = UDim2.fromOffset(32, 32)
+closeButton.BackgroundColor3 = Color3.fromRGB(40, 16, 26)
+closeButton.AutoButtonColor = true
+closeButton.Font = Enum.Font.SciFi
+closeButton.TextSize = 18
+closeButton.TextColor3 = COLORS[2]
+closeButton.Text = "X"
+closeButton.Parent = panel
+Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 8)
+
+-- tabs
+local tabHolder = Instance.new("Frame")
+tabHolder.Position = UDim2.fromOffset(12, 62)
+tabHolder.Size = UDim2.new(1, -24, 0, 28)
+tabHolder.BackgroundTransparency = 1
+tabHolder.Parent = panel
+
+local TAB_DEFS = {
+	{ id = "implants", text = "SANDEVISTANS" },
+	{ id = "burst", text = "GHOST BURST" },
+	{ id = "ankles", text = "ANKLES" },
+	{ id = "system", text = "SYSTEM" },
+}
+
+local tabButtons = {}
+local function makeTab(id, text, index, count)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1 / count, -4, 1, 0)
+	b.Position = UDim2.new((index - 1) / count, 2, 0, 0)
+	b.AutoButtonColor = false
+	b.Font = Enum.Font.SciFi
+	b.TextSize = 10
+	b.Text = text
+	b.BackgroundColor3 = Color3.fromRGB(16, 18, 30)
+	b.TextColor3 = Color3.fromRGB(130, 140, 165)
+	b.Parent = tabHolder
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+	local st = Instance.new("UIStroke")
+	st.Thickness = 2
+	st.Color = COLORS[1]
+	st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	st.Transparency = 0.7
+	st.Parent = b
+	tabButtons[id] = { button = b, stroke = st }
+end
+for i, def in ipairs(TAB_DEFS) do
+	makeTab(def.id, def.text, i, #TAB_DEFS)
+end
+
+local divider = Instance.new("Frame")
+divider.Position = UDim2.fromOffset(12, 95)
+divider.Size = UDim2.new(1, -24, 0, 1)
+divider.BackgroundColor3 = COLORS[1]
+divider.BackgroundTransparency = 0.7
+divider.BorderSizePixel = 0
+divider.Parent = panel
+
+local footer = Instance.new("TextLabel")
+footer.AnchorPoint = Vector2.new(0, 1)
+footer.Position = UDim2.new(0, 16, 1, -8)
+footer.Size = UDim2.new(1, -32, 0, 28)
+footer.BackgroundTransparency = 1
+footer.Font = Enum.Font.SciFi
+footer.TextSize = 11
+footer.TextWrapped = true
+footer.TextXAlignment = Enum.TextXAlignment.Left
+footer.TextYAlignment = Enum.TextYAlignment.Bottom
+footer.TextColor3 = Color3.fromRGB(150, 160, 185)
+footer.Text = ""
+footer.Parent = panel
+
+local function newList()
+	local sf = Instance.new("ScrollingFrame")
+	sf.Position = UDim2.fromOffset(12, 102)
+	sf.Size = UDim2.new(1, -24, 1, -142)
+	sf.BackgroundTransparency = 1
+	sf.BorderSizePixel = 0
+	sf.ScrollBarThickness = IS_TOUCH and 3 or 5
+	sf.ScrollBarImageColor3 = COLORS[1]
+	sf.ScrollingDirection = Enum.ScrollingDirection.Y
+	sf.CanvasSize = UDim2.new()
+	sf.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	sf.Parent = panel
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 8)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = sf
+	local pad = Instance.new("UIPadding")
+	pad.PaddingRight = UDim.new(0, 8)
+	pad.Parent = sf
+	return sf
+end
+local lists = { implants = newList(), burst = newList(), ankles = newList(), system = newList() }
+
+----------------------------------------------------------------
+-- menu logic
+----------------------------------------------------------------
+local activeTab = "implants"
+local lastLocked = false
+local refreshAll -- forward declaration
+
+local function isLocked()
+	return (current ~= nil) or (psycho ~= nil)
+end
+
+local function setPanelOpen(on)
+	panel.Visible = on
+	if on then
+		panelScale.Scale = 0.92
+		TweenService:Create(
+			panelScale,
+			TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+			{ Scale = 1 }
+		):Play()
+	end
+end
+
+local function flashPoints()
+	pointsNum.TextColor3 = COLORS[2]
+	TweenService:Create(pointsNum, TweenInfo.new(0.5), { TextColor3 = COLORS[1] }):Play()
+end
+
+local function tryUpgrade(key)
+	if isLocked() then return end
+	local lv = levels[key]
+	if lv >= MAX_LEVEL then return end
+	local cost = CONFIG.UPGRADE_COSTS[lv + 1]
+	if freePoints() < cost then
+		flashPoints()
+		return
+	end
+	levels[key] = lv + 1
+	if key == "humanity" then
+		-- the new capacity comes in filled
+		meter = math.min(getMeterMax(), meter + CONFIG.HUMANITY_PER_LEVEL)
+	end
+	if skeleton then skeleton.flash = 1 end
+	refreshAll()
+end
+
+local function tryDegrade(key)
+	if isLocked() then return end
+	local lv = levels[key]
+	if lv <= 0 then return end
+	levels[key] = lv - 1
+	if key == "humanity" then
+		meter = math.min(meter, getMeterMax())
+	end
+	refreshAll()
+end
+
+local function equipImplant(i)
+	if i == implantIndex then return end
+	if isLocked() then return end
+	implantIndex = i
+	if skeleton then skeleton.flash = 1 end
+	refreshAll()
+end
+
+-- install / remove the Fortified Ankles implant
+local function toggleAnkles()
+	if isLocked() then return end
+	if ankleInstalled then
+		ankleInstalled = false
+		if cancelWall then cancelWall() end
+	else
+		if freePoints() < CONFIG.ANKLE_INSTALL_COST then
+			flashPoints()
+			return
+		end
+		ankleInstalled = true
+		if skeleton then skeleton.flash = 1 end
+	end
+	refreshAll()
+end
+
+----------------------------------------------------------------
+-- card builders
+----------------------------------------------------------------
+local maxSpeed, maxJump = 0, 0
+for _, imp in ipairs(SANDEVISTANS) do
+	maxSpeed = math.max(maxSpeed, imp.speed + imp.perLevel.speed * MAX_LEVEL)
+	maxJump = math.max(maxJump, imp.jump + imp.perLevel.jump * MAX_LEVEL)
+end
+local DRAIN_BAR_MAX = 2.2
+local DARK_PIP = Color3.fromRGB(38, 40, 58)
+local GREEN = Color3.fromRGB(90, 230, 140)
+local RED = Color3.fromRGB(255, 90, 90)
+local DISABLED_TEXT = Color3.fromRGB(100, 106, 130)
+local DISABLED_BG = Color3.fromRGB(24, 28, 44)
+
+local function newCard(parent, color, height, order, clickable)
+	local card = Instance.new(clickable and "TextButton" or "Frame")
+	card.Size = UDim2.new(1, 0, 0, height)
+	card.BackgroundColor3 = Color3.fromRGB(16, 18, 30)
+	card.BackgroundTransparency = 0.05
+	card.BorderSizePixel = 0
+	card.LayoutOrder = order
+	if clickable then
+		card.AutoButtonColor = false
+		card.Text = ""
+	end
+	card.Parent = parent
+	Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
+
+	local cStroke = Instance.new("UIStroke")
+	cStroke.Thickness = 2
+	cStroke.Color = color
+	cStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	cStroke.Parent = card
+
+	local accent = Instance.new("Frame")
+	accent.Size = UDim2.new(0, 5, 1, -16)
+	accent.Position = UDim2.fromOffset(8, 8)
+	accent.BackgroundColor3 = color
+	accent.BorderSizePixel = 0
+	accent.Parent = card
+
+	return card, cStroke
+end
+
+local function newText(parent, pos, size, text, textSize, color, align)
+	local l = Instance.new("TextLabel")
+	l.Position = pos
+	l.Size = size
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.SciFi
+	l.TextSize = textSize
+	l.TextXAlignment = align or Enum.TextXAlignment.Left
+	l.TextColor3 = color
+	l.Text = text
+	l.Parent = parent
+	return l
+end
+
+local function makeStatRow(parent, y, name, color)
+	local label = newText(parent, UDim2.fromOffset(22, y), UDim2.fromOffset(50, 12), name, 11, Color3.fromRGB(150, 160, 185))
+
+	local track = Instance.new("Frame")
+	track.Position = UDim2.fromOffset(76, y + 2)
+	track.Size = UDim2.new(1, -76 - 66, 0, 8)
+	track.BackgroundColor3 = Color3.fromRGB(32, 34, 50)
+	track.BorderSizePixel = 0
+	track.Parent = parent
+	Instance.new("UICorner", track).CornerRadius = UDim.new(0, 4)
+
+	local bar = Instance.new("Frame")
+	bar.Size = UDim2.fromScale(0.04, 1)
+	bar.BackgroundColor3 = color
+	bar.BorderSizePixel = 0
+	bar.Parent = track
+	Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 4)
+
+	local value = newText(parent, UDim2.new(1, -12, 0, y - 2), UDim2.fromOffset(52, 16), "", 13, Color3.new(1, 1, 1), Enum.TextXAlignment.Right)
+	value.AnchorPoint = Vector2.new(1, 0)
+
+	return { label = label, bar = bar, value = value, color = color }
+end
+
+local function setRow(row, frac, text, color)
+	row.bar.Size = UDim2.fromScale(math.clamp(frac, 0.04, 1), 1)
+	row.bar.BackgroundColor3 = color or row.color
+	row.value.TextColor3 = color or Color3.new(1, 1, 1)
+	row.value.Text = text
+end
+
+local function makePips(card, y)
+	local lvl = newText(card, UDim2.fromOffset(22, y - 3), UDim2.fromOffset(28, 14), "LV 0", 11, Color3.fromRGB(150, 160, 185))
+	local pips = {}
+	for n = 1, MAX_LEVEL do
+		local p = Instance.new("Frame")
+		p.Position = UDim2.fromOffset(52 + (n - 1) * 12, y)
+		p.Size = UDim2.fromOffset(10, 8)
+		p.BackgroundColor3 = DARK_PIP
+		p.BorderSizePixel = 0
+		p.Parent = card
+		Instance.new("UICorner", p).CornerRadius = UDim.new(0, 2)
+		pips[n] = p
+	end
+	return { label = lvl, pips = pips }
+end
+
+local function setPips(pipSet, level, color)
+	pipSet.label.Text = "LV " .. level
+	for n, p in ipairs(pipSet.pips) do
+		p.BackgroundColor3 = (n <= level) and color or DARK_PIP
+	end
+end
+
+local function makeButton(parent, anchorX, w)
+	local b = Instance.new("TextButton")
+	b.AnchorPoint = Vector2.new(1, 1)
+	b.Position = UDim2.new(1, anchorX, 1, -8)
+	b.Size = UDim2.fromOffset(w, 24)
+	b.AutoButtonColor = false
+	b.Font = Enum.Font.SciFi
+	b.TextSize = 11
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.BackgroundColor3 = DISABLED_BG
+	b.Text = ""
+	b.Parent = parent
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+	return b
+end
+
+local function makeUpgradeButtons(card, key)
+	local down = makeButton(card, -12 - 88 - 6, 88)
+	local up = makeButton(card, -12, 88)
+	up.Activated:Connect(function() tryUpgrade(key) end)
+	down.Activated:Connect(function() tryDegrade(key) end)
+	return up, down
+end
+
+-- upBlocked = true greys out only the UPGRADE button (e.g. ankle upgrades while the implant is not installed)
+local function styleButtons(c, key, color, locked, free, upBlocked)
+	local lv = levels[key]
+	local nextCost = CONFIG.UPGRADE_COSTS[lv + 1]
+	local canUp = (not locked) and (not upBlocked) and nextCost ~= nil and free >= nextCost
+	local canDown = (not locked) and lv > 0
+
+	c.up.Text = nextCost and string.format("UPGRADE (%d)", nextCost) or "MAXED"
+	c.up.BackgroundColor3 = canUp and color:Lerp(Color3.fromRGB(10, 10, 20), 0.5) or DISABLED_BG
+	c.up.TextColor3 = canUp and Color3.new(1, 1, 1) or DISABLED_TEXT
+
+	c.down.Text = lv > 0 and string.format("DEGRADE (+%d)", CONFIG.UPGRADE_COSTS[lv]) or "DEGRADE"
+	c.down.BackgroundColor3 = DISABLED_BG
+	c.down.TextColor3 = canDown and Color3.fromRGB(255, 140, 150) or DISABLED_TEXT
+end
+
+-- one simple "NOW" upgrade card per definition (used by the System, Ghost Burst and Ankles tabs)
+local function buildUpgradeCards(list, defs, firstOrder)
+	local cards = {}
+	for i, def in ipairs(defs) do
+		local card = newCard(list, def.color, 108, firstOrder + i, false)
+		newText(card, UDim2.fromOffset(22, 6), UDim2.new(1, -30, 0, 24), def.name, 20, def.color)
+		newText(card, UDim2.fromOffset(22, 29), UDim2.new(1, -30, 0, 16), def.desc, 12, Color3.fromRGB(170, 178, 200))
+
+		local c = {
+			def = def,
+			row = makeStatRow(card, 54, "NOW", def.color),
+			pips = makePips(card, 88),
+		}
+		c.up, c.down = makeUpgradeButtons(card, def.key)
+		cards[i] = c
+	end
+	return cards
+end
+
+local function refreshUpgradeCards(cards, locked, free)
+	for _, c in ipairs(cards) do
+		local def = c.def
+		setRow(c.row, levels[def.key] / MAX_LEVEL, def.value())
+		setPips(c.pips, levels[def.key], def.color)
+		styleButtons(c, def.key, def.color, locked, free, def.blocked and def.blocked() or false)
+	end
+end
+
+----------------------------------------------------------------
+-- tab 1: Sandevistans (equip + upgrade + degrade)
+----------------------------------------------------------------
+local implantCards = {}
+for i, imp in ipairs(SANDEVISTANS) do
+	local card, cStroke = newCard(lists.implants, imp.color, 142, i, true)
+
+	newText(card, UDim2.fromOffset(22, 6), UDim2.new(1, -130, 0, 24), imp.name, 20, imp.color)
+	local tag = newText(card, UDim2.new(1, -12, 0, 10), UDim2.fromOffset(104, 16), "", 12, DISABLED_TEXT, Enum.TextXAlignment.Right)
+	tag.AnchorPoint = Vector2.new(1, 0)
+	newText(card, UDim2.fromOffset(22, 29), UDim2.new(1, -30, 0, 16), imp.desc, 12, Color3.fromRGB(170, 178, 200))
+
+	local c = {
+		card = card,
+		stroke = cStroke,
+		tag = tag,
+		speed = makeStatRow(card, 50, "SPEED", imp.color),
+		jump = makeStatRow(card, 66, "JUMP", imp.color),
+		drain = makeStatRow(card, 82, "DRAIN", Color3.fromRGB(255, 120, 90)),
+		lasts = makeStatRow(card, 98, "LASTS", GREEN),
+		pips = makePips(card, 122),
+	}
+	c.up, c.down = makeUpgradeButtons(card, i)
+
+	card.Activated:Connect(function()
+		equipImplant(i)
+	end)
+	implantCards[i] = c
+end
+
+----------------------------------------------------------------
+-- tab 2: Ghost Burst upgrades
+----------------------------------------------------------------
+local BURST_UPGRADES = {
+	{
+		key = "burstClones",
+		name = "CLONE COUNT",
+		desc = string.format("+%d clone (teleport) per level", CONFIG.BURST_CLONES_PER_LEVEL),
+		color = Color3.fromRGB(190, 70, 255),
+		value = function() return string.format("%d", getBurstClones()) end,
+	},
+	{
+		key = "burstSpeed",
+		name = "HOP SPEED",
+		desc = string.format("+%d%% teleport speed per level", math.floor(CONFIG.BURST_SPEED_PER_LEVEL * 100 + 0.5)),
+		color = Color3.fromRGB(255, 120, 90),
+		value = function() return string.format("x%.2f", getBurstSpeedMult()) end,
+	},
+	{
+		key = "burstCooldown",
+		name = "BURST COOLDOWN",
+		desc = string.format("-%gs cooldown per level (min %gs)", CONFIG.BURST_COOLDOWN_PER_LEVEL, CONFIG.BURST_COOLDOWN_MIN),
+		color = Color3.fromRGB(255, 175, 60),
+		value = function() return string.format("%.1fs", getBurstCooldown()) end,
+	},
+}
+local burstCards = buildUpgradeCards(lists.burst, BURST_UPGRADES, 0)
+
+----------------------------------------------------------------
+-- tab 3: Fortified Ankles (install + upgrades)
+----------------------------------------------------------------
+local ankleMaxJump = CONFIG.ANKLE_JUMP_VELOCITY
+	+ MAX_LEVEL * CONFIG.ANKLE_JUMP_PER_LEVEL
+	+ MAX_LEVEL * CONFIG.ANKLE_JUMPER_BONUS
+
+local ankleInfo = {}
+do
+	local card, cStroke = newCard(lists.ankles, ANKLE_COLOR, 152, 1, false)
+	newText(card, UDim2.fromOffset(22, 6), UDim2.new(1, -130, 0, 24), "FORTIFIED ANKLES", 20, ANKLE_COLOR)
+	local tag = newText(card, UDim2.new(1, -12, 0, 10), UDim2.fromOffset(110, 16), "", 12, DISABLED_TEXT, Enum.TextXAlignment.Right)
+	tag.AnchorPoint = Vector2.new(1, 0)
+
+	local desc = newText(
+		card,
+		UDim2.fromOffset(22, 31),
+		UDim2.new(1, -34, 0, 64),
+		string.format(
+			"[%s] on the ground: launch skyward, no Sandevistan needed. In the air: get pulled to the nearest wall and walk on it for %gs. "
+				.. "Brush a wall mid-air and the grip catches you by itself for %gs.",
+			CONFIG.ANKLE_KEY.Name,
+			CONFIG.ANKLE_WALL_TIME,
+			CONFIG.ANKLE_AUTO_TIME
+		),
+		12,
+		Color3.fromRGB(170, 178, 200)
+	)
+	desc.TextWrapped = true
+	desc.TextYAlignment = Enum.TextYAlignment.Top
+
+	ankleInfo.card = card
+	ankleInfo.stroke = cStroke
+	ankleInfo.tag = tag
+	ankleInfo.row = makeStatRow(card, 102, "JUMP", ANKLE_COLOR)
+	ankleInfo.button = makeButton(card, -12, 130)
+	ankleInfo.button.Activated:Connect(toggleAnkles)
+end
+
+local ANKLE_UPGRADES = {
+	{
+		key = "ankleJump",
+		name = "LEG POWER",
+		desc = string.format("+%d launch power per level (Jumper upgrades add a bit too)", CONFIG.ANKLE_JUMP_PER_LEVEL),
+		color = Color3.fromRGB(90, 235, 160),
+		value = function() return string.format("%d", getAnkleJump()) end,
+		blocked = function() return not ankleInstalled end,
+	},
+	{
+		key = "ankleGrip",
+		name = "GRIP",
+		desc = string.format("+%.1fs wall walking per level (both grips)", CONFIG.ANKLE_GRIP_PER_LEVEL),
+		color = Color3.fromRGB(70, 200, 255),
+		value = function() return string.format("%.1fs", getWallTime(true)) end,
+		blocked = function() return not ankleInstalled end,
+	},
+}
+local ankleCards = buildUpgradeCards(lists.ankles, ANKLE_UPGRADES, 1)
+
+----------------------------------------------------------------
+-- tab 4: system upgrades (humanity capacity, regen, cooldown)
+----------------------------------------------------------------
+local SYSTEM_UPGRADES = {
+	{
+		key = "humanity",
+		name = "HUMANITY CAPACITY",
+		desc = string.format("+%d max Humanity per level (up to %d)", CONFIG.HUMANITY_PER_LEVEL, CONFIG.METER_MAX + MAX_LEVEL * CONFIG.HUMANITY_PER_LEVEL),
+		color = Color3.fromRGB(70, 200, 255),
+		value = function() return string.format("%d", getMeterMax()) end,
+	},
+	{
+		key = "regen",
+		name = "HUMANITY REGEN",
+		desc = string.format("+%.1f Humanity per second while off, per level", CONFIG.REGEN_PER_LEVEL),
+		color = Color3.fromRGB(90, 235, 160),
+		value = function() return string.format("%.1f/s", getRegen()) end,
+	},
+	{
+		key = "cooldown",
+		name = "COOLDOWN",
+		desc = string.format("-%.1fs cooldown per level (min %gs)", CONFIG.COOLDOWN_PER_LEVEL, CONFIG.COOLDOWN_MIN),
+		color = Color3.fromRGB(255, 175, 60),
+		value = function() return string.format("%.1fs", getCooldown()) end,
+	},
+}
+local systemCards = buildUpgradeCards(lists.system, SYSTEM_UPGRADES, 0)
+
+----------------------------------------------------------------
+-- refresh everything
+----------------------------------------------------------------
+local PANEL_SUBS = {
+	implants = "More power = faster Humanity drain.",
+	burst = "Longer, faster, more frequent teleports.",
+	ankles = "Wall walking + a launch jump.",
+	system = "Bigger meter, faster regen, shorter cooldown.",
+}
+
+refreshAll = function()
+	local locked = isLocked()
+	lastLocked = locked
+	local free = freePoints()
+	local shown = math.max(0, free)
+
+	pointsNum.Text = tostring(shown)
+	implantBadge.Text = "+" .. shown
+	implantBadge.Visible = shown > 0
+
+	local cur = getImplant()
+	implantSub.Text = cur.name
+	implantSub.TextColor3 = cur.color
+
+	-- tabs
+	for id, tb in pairs(tabButtons) do
+		local on = (id == activeTab)
+		tb.button.BackgroundColor3 = on and Color3.fromRGB(18, 52, 70) or Color3.fromRGB(16, 18, 30)
+		tb.button.TextColor3 = on and Color3.new(1, 1, 1) or Color3.fromRGB(130, 140, 165)
+		tb.stroke.Transparency = on and 0 or 0.7
+	end
+	for id, list in pairs(lists) do
+		list.Visible = (id == activeTab)
+	end
+	panelSub.Text = PANEL_SUBS[activeTab] or ""
+
+	-- footer
+	if locked then
+		footer.Text = "LOCKED: Sandevistan is active. Turn it off to equip or upgrade."
+		footer.TextColor3 = COLORS[2]
+	else
+		footer.TextColor3 = Color3.fromRGB(150, 160, 185)
+		if activeTab == "implants" then
+			footer.Text = (IS_TOUCH and "Tap" or "Click")
+				.. " a card to equip it. LASTS = how long a full Humanity meter holds (red = cyberpsychosis before it ends)."
+		elseif activeTab == "burst" then
+			footer.Text = string.format(
+				"Earn points: +%d for every Ghost Burst that lands 2+ teleports. Degrade an upgrade to get its points back.",
+				CONFIG.POINTS_PER_BURST
+			)
+		elseif activeTab == "ankles" then
+			footer.Text = ankleInstalled
+				and string.format("[%s] ground = jump. Air = pull to wall. Press it again or jump to let go.", CONFIG.ANKLE_KEY.Name)
+				or "Install the implant to use it. Removing it refunds the install points."
+		else
+			footer.Text = string.format(
+				"Earn points: +%d per Sandevistan use, +%d per Ghost Burst. Degrade an upgrade to get its points back.",
+				CONFIG.POINTS_PER_USE,
+				CONFIG.POINTS_PER_BURST
+			)
+		end
+	end
+
+	-- sandevistan cards
+	for i, c in ipairs(implantCards) do
+		local imp = SANDEVISTANS[i]
+		local speed, jump, drain = getStats(i)
+		local lasts = timeToEmpty(drain)
+		local lastsColor = (lasts >= CONFIG.DURATION) and GREEN or RED
+
+		setRow(c.speed, speed / maxSpeed, string.format("x%.2f", speed))
+		setRow(c.jump, jump / maxJump, string.format("x%.2f", jump))
+		setRow(c.drain, drain / DRAIN_BAR_MAX, string.format("x%.2f", drain))
+		setRow(c.lasts, lasts / CONFIG.DURATION, lasts > 99 and "99s+" or string.format("%.1fs", lasts), lastsColor)
+		setPips(c.pips, levels[i], imp.color)
+		styleButtons(c, i, imp.color, locked, free)
+
+		local on = (i == implantIndex)
+		c.stroke.Transparency = on and 0 or 0.65
+		c.card.BackgroundColor3 = on
+			and imp.color:Lerp(Color3.fromRGB(10, 10, 20), 0.85)
+			or Color3.fromRGB(16, 18, 30)
+		if on then
+			c.tag.Text = "● EQUIPPED"
+			c.tag.TextColor3 = imp.color
+		else
+			c.tag.Text = locked and "LOCKED" or "TAP TO EQUIP"
+			c.tag.TextColor3 = DISABLED_TEXT
+		end
+	end
+
+	-- ghost burst cards
+	refreshUpgradeCards(burstCards, locked, free)
+
+	-- ankle install card + upgrade cards
+	local installCost = CONFIG.ANKLE_INSTALL_COST
+	setRow(ankleInfo.row, getAnkleJump() / ankleMaxJump, string.format("%d", getAnkleJump()))
+	ankleInfo.stroke.Transparency = ankleInstalled and 0 or 0.65
+	ankleInfo.card.BackgroundColor3 = ankleInstalled
+		and ANKLE_COLOR:Lerp(Color3.fromRGB(10, 10, 20), 0.88)
+		or Color3.fromRGB(16, 18, 30)
+	ankleInfo.tag.Text = ankleInstalled and "● INSTALLED" or "NOT INSTALLED"
+	ankleInfo.tag.TextColor3 = ankleInstalled and ANKLE_COLOR or DISABLED_TEXT
+	local canInstall = (not locked) and (ankleInstalled or free >= installCost)
+	ankleInfo.button.Text = ankleInstalled and string.format("REMOVE (+%d)", installCost) or string.format("INSTALL (%d)", installCost)
+	if ankleInstalled then
+		ankleInfo.button.BackgroundColor3 = DISABLED_BG
+		ankleInfo.button.TextColor3 = (not locked) and Color3.fromRGB(255, 140, 150) or DISABLED_TEXT
+	else
+		ankleInfo.button.BackgroundColor3 = canInstall and ANKLE_COLOR:Lerp(Color3.fromRGB(10, 10, 20), 0.5) or DISABLED_BG
+		ankleInfo.button.TextColor3 = canInstall and Color3.new(1, 1, 1) or DISABLED_TEXT
+	end
+	refreshUpgradeCards(ankleCards, locked, free)
+
+	-- system cards
+	refreshUpgradeCards(systemCards, locked, free)
+end
+
+-- called every frame from the HUD loop; only does work when the lock state changes
+local function updateImplantFooter(locked)
+	if locked ~= lastLocked then
+		refreshAll()
+	end
+end
+
+local function setTab(id)
+	activeTab = id
+	refreshAll()
+end
+
+for _, def in ipairs(TAB_DEFS) do
+	local id = def.id
+	tabButtons[id].button.Activated:Connect(function() setTab(id) end)
+end
+
+implantButton.Activated:Connect(function()
+	setPanelOpen(not panel.Visible)
+end)
+closeButton.Activated:Connect(function()
+	setPanelOpen(false)
+end)
+
+-- a server script can hand out points: player:SetAttribute("SandevistanPoints", 40)
+player:GetAttributeChangedSignal("SandevistanPoints"):Connect(function()
+	refreshAll()
+end)
+
+-- gives the player upgrade points (called when Sandevistan / Ghost Burst are used)
+local function awardPoints(n, reason)
+	if n <= 0 then return end
+	earnedPoints += n
+	showToast(string.format("+%d UPGRADE POINT%s  (%s)", n, n == 1 and "" or "S", reason))
+	refreshAll()
+end
+
+refreshAll()
+
+----------------------------------------------------------------
+-- GHOST PARTS (shared by afterimages, cyberpsychosis duplicates and burst clones)
+----------------------------------------------------------------
+local function makeGhostPart(part, color, alpha)
+	local ghost = part:Clone()
+	if not ghost then return nil end
+	for _, c in ipairs(ghost:GetChildren()) do
+		if c:IsA("SpecialMesh") then
+			c.TextureId = ""
+		else
+			c:Destroy()
+		end
+	end
+	if ghost:IsA("MeshPart") then
+		pcall(function() ghost.TextureID = "" end)
+	end
+	ghost.Name = "Ghost"
+	ghost.Anchored = true
+	ghost.CanCollide = false
+	ghost.CanTouch = false
+	ghost.CanQuery = false
+	ghost.Massless = true
+	ghost.Material = CONFIG.GHOST_MATERIAL
+	ghost.Color = color
+	ghost.Transparency = alpha
+	return ghost
+end
+
+local function isBodyPart(part)
+	return part:IsA("BasePart")
+		and part.Name ~= "HumanoidRootPart"
+		and part.Transparency < 0.95
+		and not part:GetAttribute("NoGhost")
+end
+
+----------------------------------------------------------------
+-- AFTERIMAGES (frozen in place, color shifts along the palette as they age)
+----------------------------------------------------------------
+local function spawnGhost(char, palette)
+	if ghostCount >= CONFIG.GHOST_MAX_PARTS then return end
+
+	local parts = {}
+	local startColor = palette.stops[1].c
+
+	for _, part in ipairs(char:GetDescendants()) do
+		if isBodyPart(part) then
+			local ghost = makeGhostPart(part, startColor, CONFIG.GHOST_ALPHA)
+			if ghost then
+				ghost.CFrame = part.CFrame
+				ghost.Parent = ghostFolder
+				table.insert(parts, ghost)
+			end
+		end
+	end
+
+	ghostCount += #parts
+	table.insert(ghostBatches, { t0 = os.clock(), parts = parts, stops = palette.stops })
+end
+
+-- one shared updater drives every ghost's color/fade
+RunService.RenderStepped:Connect(function()
+	if #ghostBatches == 0 then return end
+	local now = os.clock()
+	local i = 1
+	while i <= #ghostBatches do
+		local b = ghostBatches[i]
+		local age = (now - b.t0) / CONFIG.GHOST_LIFETIME
+		if age >= 1 then
+			for _, p in ipairs(b.parts) do p:Destroy() end
+			ghostCount -= #b.parts
+			table.remove(ghostBatches, i)
+		else
+			-- eased age: colors move through the gradient a little slower, so blue arrives later
+			local c = sampleGradient(b.stops, age ^ CONFIG.GHOST_COLOR_EASE)
+			local tr = CONFIG.GHOST_ALPHA + math.max(0, (age - 0.75) / 0.25) * (1 - CONFIG.GHOST_ALPHA)
+			for _, p in ipairs(b.parts) do
+				p.Color = c
+				p.Transparency = tr
+			end
+			i += 1
+		end
+	end
+end)
+
+----------------------------------------------------------------
+-- WORLD SLOW-MO (visual, client side)
+----------------------------------------------------------------
+local function slowModel(model)
+	if model == player.Character then return end
+	local hum = model:FindFirstChildOfClass("Humanoid")
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+	if not animator then return end
+	slowed[animator] = true
+	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+		track:AdjustSpeed(CONFIG.WORLD_ANIM_SPEED)
+	end
+end
+
+local function scanWorld()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then slowModel(p.Character) end
+	end
+	for _, m in ipairs(workspace:GetChildren()) do
+		if m:IsA("Model") then slowModel(m) end
+	end
+end
+
+local function restoreWorld()
+	for animator in pairs(slowed) do
+		if animator.Parent then
+			for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+				track:AdjustSpeed(1)
+			end
+		end
+	end
+	table.clear(slowed)
+end
+
+local function feetPosOf(humanoid, root)
+	return root.Position - Vector3.new(0, humanoid.HipHeight + root.Size.Y / 2, 0)
+end
+
+----------------------------------------------------------------
+-- CYBERPSYCHOSIS
+-- Frozen in place, 3 glitching duplicates (right / left / behind),
+-- violent camera shake, screen glitches, then a reboot.
+----------------------------------------------------------------
+local function stopPsychosis(silent)
+	local p = psycho
+	if not p then return end
+	psycho = nil
+
+	pcall(function() RunService:UnbindFromRenderStep("SandevistanPsychosis") end)
+
+	for _, o in ipairs(p.objects) do
+		if o.Parent then o:Destroy() end
+	end
+
+	local hum = p.humanoid
+	if hum and hum.Parent then
+		hum.WalkSpeed = p.baseSpeed
+		if hum.UseJumpPower then
+			hum.JumpPower = p.baseJump
+		else
+			hum.JumpHeight = p.baseJump
+		end
+		hum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+		hum.AutoRotate = p.autoRotate
+		hum.CameraOffset = Vector3.zero
+		setAnimSpeed(hum, 1)
+	end
+	setControlsEnabled(true)
+
+	hidePsychUI()
+	setEffects(false, p.baseFov, 0.8)
+
+	if not silent then
+		meter = getMeterMax() * CONFIG.PSYCHOSIS_RECOVER_FRAC
+		cooldownTotal = CONFIG.PSYCHOSIS_LOCKOUT
+		cooldownEnd = os.clock() + cooldownTotal
+		flashTitle("REBOOTED", COLORS[1])
+	end
+end
+
+local function psychosisStep(dt)
+	local p = psycho
+	if not p then return end
+
+	local now = os.clock()
+	local elapsed = now - p.startTime
+	local remaining = p.endTime - now
+	local root = p.root
+
+	if remaining <= 0 or p.humanoid.Health <= 0 or not p.char.Parent or not root.Parent then
+		stopPsychosis()
+		return
+	end
+
+	-- 0..1 ramp in and out so the episode doesn't pop on/off
+	local k = math.min(math.clamp(elapsed / 0.35, 0, 1), math.clamp(remaining / 0.8, 0, 1))
+	local heart = math.max(0, math.sin(now * 11)) ^ 6 -- sharp heartbeat thumps
+
+	-- keep the body locked down
+	p.humanoid.WalkSpeed = 0
+	p.humanoid:Move(Vector3.zero)
+	setAnimSpeed(p.humanoid, 0.25)
+
+	-- ---------- camera shake (rotation + position + FOV pulse) ----------
+	local nx = math.noise(now * 13, 0.3)
+	local ny = math.noise(now * 13, 7.1)
+	local nr = math.noise(now * 9, 3.7)
+	p.spike = p.spike * math.exp(-dt * 12)
+	camera.CFrame = camera.CFrame
+		* CFrame.new(nx * 1.6 * k, ny * 1.6 * k, 0)
+		* CFrame.Angles(ny * 0.08 * k, nx * 0.08 * k, nr * 0.4 * k + p.spike * k)
+	camera.FieldOfView = p.baseFov + (-8 + heart * 7 + p.spike * 30) * k
+
+	-- ---------- glitch tick (random, ~8-12 times a second) ----------
+	if now >= p.nextGlitch then
+		p.nextGlitch = now + 0.06 + math.random() * 0.1
+		p.spike = (math.random() - 0.5) * 0.5
+
+		local neon = randomNeon()
+		cc.TintColor = neon:Lerp(Color3.new(1, 1, 1), 0.35)
+		cc.Saturation = (math.random() < 0.2) and (math.random() < 0.5 and -1 or 1) or 0.3
+		cc.Contrast = 0.3 + math.random() * 0.5
+		cc.Brightness = (math.random() - 0.5) * 0.2
+		blur.Size = 4 + math.random() * 14
+		bloom.Intensity = 1.2 + math.random() * 1.2
+		bloom.Threshold = 0.8
+
+		glitchBars()
+		redFlash.BackgroundTransparency = (math.random() < 0.35) and (0.82 + math.random() * 0.1) or 1
+
+		psychTitle.Text = corrupt("CYBERPSYCHOSIS", 0.22)
+		psychTitle.TextColor3 = neon
+		psychTitle.Position = UDim2.new(0.5, math.random(-14, 14), 0.24, math.random(-8, 8))
+
+		p.highlight.FillColor = neon
+		p.highlight.OutlineColor = randomNeon()
+
+		-- duplicates: new flicker + positional jitter
+		for _, d in ipairs(p.doubles) do
+			d.alpha = 0.25 + math.random() * 0.4
+			if math.random() < 0.45 then
+				d.jitter = Vector3.new((math.random() - 0.5) * 2.4, (math.random() - 0.5) * 1.6, (math.random() - 0.5) * 2.4)
+			else
+				d.jitter = Vector3.zero
+			end
+		end
+
+		-- little involuntary body twitch
+		if math.random() < 0.35 then
+			root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(math.random(-14, 14)), 0)
+		end
+
+		-- ripples of energy
+		if now >= p.nextWave then
+			p.nextWave = now + 1.1
+			shockwave(feetPosOf(p.humanoid, root), PSYCHO_PALETTE, 1.2)
+		end
+	end
+
+	-- ---------- 3 duplicates, each in its own direction ----------
+	local rootCF = root.CFrame
+	for i, d in ipairs(p.doubles) do
+		local dir = DOUBLE_DIRS[i](rootCF)
+		local wob = math.sin(now * 3 + d.phase)
+		local dist = (CONFIG.DOUBLE_DISTANCE + wob * CONFIG.DOUBLE_WOBBLE) * k
+		local offset = dir * dist + d.jitter * k
+		local tr = 1 - (1 - d.alpha) * k
+		for _, pair in ipairs(d.parts) do
+			if pair.orig.Parent then
+				pair.ghost.CFrame = pair.orig.CFrame + offset
+				pair.ghost.Transparency = tr
+			end
+		end
+	end
+
+	-- ---------- screen edges throb with the heartbeat ----------
+	for _, f in ipairs(edges) do
+		f.BackgroundTransparency = 1 - (0.5 + heart * 0.5) * k
+	end
+
+	psychSub.Text = string.format("SYSTEM REBOOT  %.1f", remaining)
+end
+
+local function startPsychosis(baseFov)
+	if psycho then return end
+
+	local char = player.Character
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (humanoid and root) or humanoid.Health <= 0 then
+		meter = getMeterMax() * CONFIG.PSYCHOSIS_RECOVER_FRAC
+		cooldownTotal = CONFIG.PSYCHOSIS_LOCKOUT
+		cooldownEnd = os.clock() + cooldownTotal
+		return
+	end
+
+	-- a Ghost Burst or wall walk in progress gets cut off
+	if cancelBurst then cancelBurst(false) end
+	if cancelWall then cancelWall() end
+
+	local now = os.clock()
+	local p = {
+		char = char,
+		humanoid = humanoid,
+		root = root,
+		startTime = now,
+		endTime = now + CONFIG.PSYCHOSIS_DURATION,
+		baseSpeed = humanoid.WalkSpeed,
+		baseJump = humanoid.UseJumpPower and humanoid.JumpPower or humanoid.JumpHeight,
+		autoRotate = humanoid.AutoRotate,
+		baseFov = baseFov or camera.FieldOfView,
+		objects = {},
+		doubles = {},
+		spike = 0.4,
+		nextGlitch = 0,
+		nextWave = 0,
+	}
+	psycho = p
+
+	-- can't move, can't jump
+	setControlsEnabled(false)
+	humanoid.WalkSpeed = 0
+	if humanoid.UseJumpPower then
+		humanoid.JumpPower = 0
+	else
+		humanoid.JumpHeight = 0
+	end
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+	humanoid.AutoRotate = false
+	root.AssemblyLinearVelocity = Vector3.new(0, root.AssemblyLinearVelocity.Y, 0)
+
+	-- glitching body glow
+	local highlight = Instance.new("Highlight")
+	highlight.Adornee = char
+	highlight.FillColor = DOUBLE_COLORS[1]
+	highlight.FillTransparency = 0.45
+	highlight.OutlineColor = DOUBLE_COLORS[2]
+	highlight.OutlineTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = char
+	p.highlight = highlight
+	table.insert(p.objects, highlight)
+
+	-- build the 3 duplicates (right, left, behind)
+	for i = 1, #DOUBLE_DIRS do
+		local d = {
+			parts = {},
+			phase = i * 2.1,
+			alpha = 0.4,
+			jitter = Vector3.zero,
+		}
+		for _, part in ipairs(char:GetDescendants()) do
+			if isBodyPart(part) then
+				local ghost = makeGhostPart(part, DOUBLE_COLORS[i], 1)
+				if ghost then
+					ghost.CFrame = part.CFrame
+					ghost.Parent = ghostFolder
+					table.insert(d.parts, { orig = part, ghost = ghost })
+					table.insert(p.objects, ghost)
+				end
+			end
+		end
+		table.insert(p.doubles, d)
+	end
+
+	-- opening burst
+	shockwave(feetPosOf(humanoid, root), PSYCHO_PALETTE, 1.6)
+	psychTitle.TextTransparency = 0
+	psychStroke.Transparency = 0
+	psychSub.TextTransparency = 0
+	psychSubStroke.Transparency = 0
+	flashTitle("HUMANITY LOST", DOUBLE_COLORS[1])
+
+	RunService:BindToRenderStep("SandevistanPsychosis", Enum.RenderPriority.Camera.Value + 1, psychosisStep)
+end
+
+----------------------------------------------------------------
+-- GHOST BURST
+-- 1. Plants a (nearly straight) line of ghost clones in front of you (where the camera looks).
+-- 2. Teleports you to each clone, one after the other. The hop interval is
+--    BURST_BASE_INTERVAL / (your equipped Sandevistan's speed x the HOP SPEED upgrade).
+--
+-- WALL CHECK (done when planting AND again right before every teleport):
+--   * a body-sized block is swept from spot to spot, so walls / ceilings / pillars stop the chain
+--   * a downward ray finds the floor under every clone: no floor (void / big drop), water or
+--     steep slopes = the chain ends there
+--   * the final spot must have no solid parts overlapping the body
+----------------------------------------------------------------
+local BURST_STEP_CLEAR = 1.0 -- the sweep block floats this far above the floor (so small bumps don't block it)
+
+local function makeBurstContext(char, humanoid, root)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { char, ghostFolder }
+	params.RespectCanCollide = true
+
+	local overlap = OverlapParams.new()
+	overlap.FilterType = Enum.RaycastFilterType.Exclude
+	overlap.FilterDescendantsInstances = { char, ghostFolder }
+	overlap.RespectCanCollide = true
+
+	-- How high the root sits above the floor. Measured while you're standing, estimated from the
+	-- body's bounding box otherwise. (The old HipHeight formula is wrong for R6 rigs and some custom
+	-- characters, which put every clone inside the floor and caused "NO SPACE" every time.)
+	local boxCF, boxSize = char:GetBoundingBox()
+	local footOffset
+	if humanoid.FloorMaterial ~= Enum.Material.Air then
+		local down = workspace:Raycast(root.Position, Vector3.new(0, -12, 0), params)
+		if down then
+			footOffset = root.Position.Y - down.Position.Y
+		end
+	end
+	if not footOffset then
+		footOffset = root.Position.Y - (boxCF.Position.Y - boxSize.Y / 2)
+	end
+	footOffset = math.clamp(footOffset, 1.5, 6)
+
+	-- body-sized sweep block: starts BURST_STEP_CLEAR above the floor, ends just under the head
+	local height = math.clamp(boxSize.Y - 1.1, 2.5, 6)
+	return {
+		char = char,
+		params = params,
+		overlap = overlap,
+		footOffset = footOffset,
+		size = Vector3.new(2.2, height, 2.2),
+		lift = Vector3.new(0, BURST_STEP_CLEAR + height / 2 - footOffset, 0), -- root -> block center
+	}
+end
+
+-- floor under a point: returns the root position that stands on it, or nil (void, cliff, water, steep slope)
+local function burstGround(p, refY, ctx)
+	local origin = Vector3.new(p.X, refY + CONFIG.BURST_STEP_UP, p.Z)
+	local length = CONFIG.BURST_STEP_UP + ctx.footOffset + CONFIG.BURST_MAX_DROP
+	local r = workspace:Raycast(origin, Vector3.new(0, -length, 0), ctx.params)
+	if not r then return nil, "no floor below the spot (void or too big a drop)" end
+	if r.Material == Enum.Material.Water then return nil, "water" end
+	if r.Normal.Y < 0.6 then return nil, "slope too steep (" .. r.Instance.Name .. ")" end
+	return Vector3.new(p.X, r.Position.Y + ctx.footOffset, p.Z)
+end
+
+-- sweeps a body-sized block from `from` to `to`. Returns true if clear, otherwise false + the hit result
+local function burstPathClear(from, to, ctx)
+	local delta = to - from
+	if delta.Magnitude < 0.05 then return true end
+	local hit = workspace:Blockcast(CFrame.new(from + ctx.lift), ctx.size, delta, ctx.params)
+	return hit == nil, hit
+end
+
+-- true if nothing solid overlaps a body standing at `pos` (second value = the part in the way)
+local function burstSpotFree(pos, ctx)
+	local box = ctx.size - Vector3.new(0.3, 0.3, 0.3)
+	local parts = workspace:GetPartBoundsInBox(CFrame.new(pos + ctx.lift), box, ctx.overlap)
+	return #parts == 0, parts[1]
+end
+
+-- finds a valid spot near `wanted` (shortened if a wall is in the way). Returns the spot, or nil + a reason
+local function burstResolve(prev, wanted, ctx)
+	local pos, why = burstGround(wanted, prev.Y, ctx)
+	if not pos then return nil, why end
+	local delta = pos - prev
+	if delta.Magnitude < CONFIG.BURST_MIN_STEP then return nil, "spot too close to the last one" end
+
+	local clear, hit = burstPathClear(prev, pos, ctx)
+	if not clear then
+		-- stop just short of the wall and try again from there
+		local safe = hit.Distance - 0.4
+		if safe < CONFIG.BURST_MIN_STEP then
+			return nil, "wall too close: " .. hit.Instance:GetFullName()
+		end
+		local reduced = prev + delta.Unit * safe
+		pos, why = burstGround(reduced, prev.Y, ctx)
+		if not pos then return nil, why end
+		if (pos - prev).Magnitude < CONFIG.BURST_MIN_STEP then return nil, "spot too close to the last one" end
+		local clear2, hit2 = burstPathClear(prev, pos, ctx)
+		if not clear2 then return nil, "blocked by " .. hit2.Instance:GetFullName() end
+	end
+
+	local free, blocker = burstSpotFree(pos, ctx)
+	if not free then return nil, "spot occupied by " .. blocker:GetFullName() end
+	return pos
+end
+
+-- returns the list of clone spots (and, if the list is empty, the reason why)
+local function planBurst(ctx, root)
+	local look = camera.CFrame.LookVector
+	local dir = Vector3.new(look.X, 0, look.Z)
+	if dir.Magnitude < 0.05 then
+		local rl = root.CFrame.LookVector
+		dir = Vector3.new(rl.X, 0, rl.Z)
+	end
+	if dir.Magnitude < 0.05 then return {}, "no usable look direction" end
+	dir = dir.Unit
+	local right = dir:Cross(Vector3.yAxis)
+
+	local origin = root.Position
+	local plan = {}
+	local prev = origin
+	local lastReason = "unknown"
+	for i = 1, getBurstClones() do
+		local side = (i % 2 == 1) and 1 or -1
+		local wanted = origin + dir * (CONFIG.BURST_SPACING * i) + right * (side * CONFIG.BURST_ZIGZAG)
+		local pos, why = burstResolve(prev, wanted, ctx)
+		if not pos then
+			lastReason = why or lastReason
+			break
+		end
+		table.insert(plan, pos)
+		prev = pos
+	end
+	return plan, lastReason
+end
+
+-- a standing copy of your current pose at `pos`
+local function makeBurstClone(char, root, pos, face, palette, delay)
+	local rootCF = root.CFrame
+	local targetCF = CFrame.lookAt(pos, pos + face)
+	local parts = {}
+	for _, part in ipairs(char:GetDescendants()) do
+		if isBodyPart(part) then
+			local ghost = makeGhostPart(part, palette.stops[1].c, 1)
+			if ghost then
+				ghost.CFrame = targetCF * rootCF:ToObjectSpace(part.CFrame)
+				ghost.Parent = ghostFolder
+				table.insert(parts, ghost)
+				TweenService:Create(
+					ghost,
+					TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, delay),
+					{ Transparency = 0.35 }
+				):Play()
+			end
+		end
+	end
+	return { parts = parts, pos = pos, face = face, gone = false }
+end
+
+local function fadeParts(parts, t)
+	for _, part in ipairs(parts) do
+		if part.Parent then
+			TweenService:Create(part, TweenInfo.new(t), { Transparency = 1 }):Play()
+			Debris:AddItem(part, t + 0.05)
+		end
+	end
+end
+
+-- neon streak between two teleport points
+local function burstStreak(from, to, palette)
+	local dist = (to - from).Magnitude
+	if dist < 0.1 then return end
+	local streak = Instance.new("Part")
+	streak.Anchored = true
+	streak.CanCollide = false
+	streak.CanTouch = false
+	streak.CanQuery = false
+	streak.CastShadow = false
+	streak.Material = Enum.Material.Neon
+	streak.Color = palette.stops[2].c
+	streak.Transparency = 0.2
+	streak.Size = Vector3.new(0.9, 0.9, dist)
+	streak.CFrame = CFrame.lookAt(from:Lerp(to, 0.5), to)
+	streak.Parent = ghostFolder
+	TweenService:Create(
+		streak,
+		TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Transparency = 1, Size = Vector3.new(0.05, 0.05, dist) }
+	):Play()
+	Debris:AddItem(streak, 0.35)
+end
+
+-- stops a burst immediately (death, respawn, cyberpsychosis)
+cancelBurst = function(enableControls)
+	local b = burst
+	if not b then return end
+	burst = nil
+	b.cancelled = true
+	if b.conn then b.conn:Disconnect() end
+	for _, c in ipairs(b.clones) do
+		for _, part in ipairs(c.parts) do
+			if part.Parent then part:Destroy() end
+		end
+	end
+	if enableControls and not psycho then
+		setControlsEnabled(true)
+	end
+end
+
+-- normal end of a burst
+local function finishBurst(b, teleports)
+	if burst ~= b then return end
+	burst = nil
+	if b.conn then b.conn:Disconnect() end
+	for _, c in ipairs(b.clones) do
+		if not c.gone then fadeParts(c.parts, 0.2) end
+	end
+	if not psycho then
+		setControlsEnabled(true)
+	end
+	burstCooldownTotal = getBurstCooldown()
+	burstCooldownEnd = os.clock() + burstCooldownTotal
+	if teleports >= 2 then
+		awardPoints(CONFIG.POINTS_PER_BURST, "GHOST BURST")
+	end
+end
+
+local function runBurst(b)
+	local char, humanoid, root = b.char, b.humanoid, b.root
+	local function alive()
+		return burst == b and not b.cancelled and humanoid.Parent ~= nil and humanoid.Health > 0 and root.Parent ~= nil
+	end
+
+	task.wait(CONFIG.BURST_PLANT_TIME)
+
+	local teleports = 0
+	for _, clone in ipairs(b.clones) do
+		if not alive() then return end
+
+		local from = root.Position
+		local target = clone.pos
+
+		-- wall check again right before jumping (things may have moved since planting)
+		local ok = (from - target).Magnitude <= CONFIG.BURST_SPACING * 3
+		if ok then
+			ok = burstPathClear(from, target, b.ctx) and burstSpotFree(target, b.ctx)
+		end
+		if not ok then break end
+
+		-- afterimage where you were, streak to where you're going
+		spawnGhost(char, b.palette)
+		burstStreak(from, target, b.palette)
+
+		local flat = Vector3.new(target.X - from.X, 0, target.Z - from.Z)
+		local face = (flat.Magnitude > 0.1) and flat.Unit or clone.face
+		root.CFrame = CFrame.lookAt(target, target + face)
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+
+		shockwave(feetPosOf(humanoid, root), b.palette, 0.4)
+		shake(humanoid, 0.45, 0.15)
+
+		-- this clone is "used up"
+		clone.gone = true
+		fadeParts(clone.parts, 0.15)
+
+		teleports += 1
+		task.wait(b.interval)
+	end
+
+	if not alive() then return end
+	finishBurst(b, teleports)
+end
+
+local function startBurst()
+	if psycho or burst or wall then return end
+	if os.clock() < burstCooldownEnd then return end
+
+	local char = player.Character
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (humanoid and root) or humanoid.Health <= 0 then return end
+
+	-- hop speed comes from your equipped Sandevistan (upgrades included) and the HOP SPEED upgrade
+	local speed, _, drainMult = getStats(implantIndex)
+	local cost = CONFIG.BURST_COST * drainMult
+	if meter <= cost + 1 then
+		flashTitle("LOW HUMANITY", COLORS[2])
+		return
+	end
+
+	local ctx = makeBurstContext(char, humanoid, root)
+	local plan, reason = planBurst(ctx, root)
+	if #plan == 0 then
+		warn("[Ghost Burst] NO SPACE: " .. tostring(reason))
+		flashTitle("NO SPACE", COLORS[2])
+		return
+	end
+
+	meter = math.max(1, meter - cost)
+
+	local palette = PALETTES[1]
+	local b = {
+		char = char,
+		humanoid = humanoid,
+		root = root,
+		ctx = ctx,
+		palette = palette,
+		interval = math.max(0.04, CONFIG.BURST_BASE_INTERVAL / (speed * getBurstSpeedMult())),
+		clones = {},
+		cancelled = false,
+	}
+	burst = b
+
+	setControlsEnabled(false)
+
+	-- plant the clones, each one facing the way you'll travel
+	local prev = root.Position
+	for i, pos in ipairs(plan) do
+		local flat = Vector3.new(pos.X - prev.X, 0, pos.Z - prev.Z)
+		local face = (flat.Magnitude > 0.1) and flat.Unit or root.CFrame.LookVector
+		table.insert(b.clones, makeBurstClone(char, root, pos, face, palette, (i - 1) * 0.06))
+		prev = pos
+	end
+
+	shockwave(feetPosOf(humanoid, root), palette, 0.6)
+	flashTitle("GHOST BURST", palette.stops[1].c)
+
+	-- planted clones shimmer through the ghost gradient
+	b.conn = RunService.RenderStepped:Connect(function()
+		local now = os.clock()
+		for idx, c in ipairs(b.clones) do
+			if not c.gone then
+				local col = sampleGradient(palette.stops, (math.sin(now * 4 + idx * 1.3) + 1) / 2)
+				for _, part in ipairs(c.parts) do
+					if part.Parent then part.Color = col end
+				end
+			end
+		end
+	end)
+
+	task.spawn(runBurst, b)
+end
+
+----------------------------------------------------------------
+-- FORTIFIED ANKLES
+--   Ground:  press the button = a big launch jump (no Sandevistan needed, it is just a jump).
+--   Air:     press the button = the ankles pull you to the nearest wall and you wall walk on it.
+--   Grip:    brush a wall mid-air while moving toward it = you grip it on your own for a shorter time.
+--   Jump / press the button again = let go.
+--
+-- Wall walking is physics based: a LinearVelocity carries you along the wall and an AlignOrientation
+-- puts your feet on it. Each frame a ray is cast into the wall to follow its shape (corners, curves).
+-- It ends when the time runs out, you jump off, you walk onto the floor, or you run off the edge
+-- (running off the top of a wall vaults you up onto the ledge).
+----------------------------------------------------------------
+local moveControls
+-- camera-relative move input (x = right, z = back), works for keyboard, thumbstick and gamepad
+local function getMoveVector()
+	if not moveControls then
+		pcall(function()
+			local ps = player:FindFirstChild("PlayerScripts")
+			local module = ps and ps:FindFirstChild("PlayerModule")
+			if module then
+				moveControls = require(module):GetControls()
+			end
+		end)
+	end
+	if moveControls then
+		local ok, mv = pcall(function() return moveControls:GetMoveVector() end)
+		if ok and typeof(mv) == "Vector3" then return mv end
+	end
+	return Vector3.zero
+end
+
+local function makeWallParams(char)
+	local ignore = { char, ghostFolder }
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character and p.Character ~= char then
+			table.insert(ignore, p.Character)
+		end
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignore
+	params.RespectCanCollide = true
+	return params
+end
+
+-- NPCs / other characters are not walls
+local function validWall(r)
+	if not r then return false end
+	local m = r.Instance:FindFirstAncestorOfClass("Model")
+	if m and m:FindFirstChildOfClass("Humanoid") then return false end
+	return true
+end
+
+local function planeProject(v, n)
+	return v - n * v:Dot(n)
+end
+
+-- orientation with your feet on the wall (up = wall normal) and your face toward the walking direction
+local function wallCFrame(face, n)
+	local dir = planeProject(face, n)
+	if dir.Magnitude < 0.05 then dir = planeProject(Vector3.yAxis, n) end
+	if dir.Magnitude < 0.05 then dir = planeProject(Vector3.xAxis, n) end
+	return CFrame.lookAt(Vector3.zero, dir.Unit, n)
+end
+
+-- distance from the root to the soles of your feet
+local function ankleFootOffset(char, root)
+	local boxCF, boxSize = char:GetBoundingBox()
+	return math.clamp(root.Position.Y - (boxCF.Position.Y - boxSize.Y / 2), 1.5, 6)
+end
+
+-- looks in every direction for the closest wall (steep surface). Returns the raycast result or nil
+local WALL_DIRS = {}
+for i = 0, 15 do
+	local a = i / 16 * math.pi * 2
+	table.insert(WALL_DIRS, Vector3.new(math.cos(a), 0, math.sin(a)))
+end
+for i = 0, 7 do
+	local a = i / 8 * math.pi * 2
+	table.insert(WALL_DIRS, Vector3.new(math.cos(a) * 0.87, 0.5, math.sin(a) * 0.87))
+	table.insert(WALL_DIRS, Vector3.new(math.cos(a) * 0.87, -0.5, math.sin(a) * 0.87))
+end
+
+local function findNearestWall(root, params, range)
+	local best
+	for _, d in ipairs(WALL_DIRS) do
+		local r = workspace:Raycast(root.Position, d.Unit * range, params)
+		if r and math.abs(r.Normal.Y) < 0.55 and validWall(r) then
+			if not best or r.Distance < best.Distance then
+				best = r
+			end
+		end
+	end
+	return best
+end
+
+-- ends the wall walk. `vel` = the velocity you leave the wall with (optional)
+local function endWall(w, reason, vel)
+	if wall ~= w then return end
+	wall = nil
+	if w.conn then w.conn:Disconnect() end
+	for _, o in ipairs(w.objects) do
+		if o.Parent then o:Destroy() end
+	end
+
+	local humanoid, root = w.humanoid, w.root
+	local n = w.normal
+
+	if root.Parent then
+		-- stand back up, nudged off the wall so the body doesn't end up inside it
+		local pos = root.Position
+		if n.Y < -0.6 then
+			pos += n * 3
+		else
+			local h = Vector3.new(n.X, 0, n.Z)
+			if h.Magnitude > 0.1 then
+				pos += h.Unit * 1.6
+			end
+		end
+		local look = Vector3.new(w.lastDir.X, 0, w.lastDir.Z)
+		if look.Magnitude < 0.1 then
+			local cl = camera.CFrame.LookVector
+			look = Vector3.new(cl.X, 0, cl.Z)
+		end
+		if look.Magnitude < 0.1 then look = Vector3.zAxis end
+		root.CFrame = CFrame.lookAt(pos, pos + look.Unit, Vector3.yAxis)
+		root.AssemblyAngularVelocity = Vector3.zero
+		root.AssemblyLinearVelocity = vel or (n * 6)
+		wallPulse(pos, 0.5)
+	end
+
+	if humanoid.Parent then
+		humanoid.PlatformStand = false
+		humanoid.AutoRotate = w.autoRotate
+		if humanoid.Health > 0 then
+			humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+		end
+	end
+
+	autoGripReady = false -- the automatic grip re-arms when you touch the ground
+	local cd = (reason == "jump") and 0.8 or (w.manual and CONFIG.ANKLE_COOLDOWN or 2.5)
+	ankleCooldownTotal = cd
+	ankleCooldownEnd = os.clock() + cd
+end
+
+cancelWall = function()
+	if wall then
+		endWall(wall, "cancel")
+	end
+end
+
+local function wallStep(w, dt)
+	if wall ~= w then return end
+	local humanoid, root = w.humanoid, w.root
+	if humanoid.Health <= 0 or not root.Parent or not w.char.Parent then
+		endWall(w, "dead")
+		return
+	end
+
+	local now = os.clock()
+	local lv, ao = w.lv, w.ao
+
+	-- phase 1: the ankles drag you to the wall
+	if w.phase == "pull" then
+		local toTarget = w.target - root.Position
+		if toTarget.Magnitude < 2.5 or now > w.deadline then
+			w.phase = "walk"
+			w.total = getWallTime(true)
+			w.endTime = now + w.total
+			wallPulse(root.Position, 0.6)
+			shake(humanoid, 0.5, 0.2)
+		else
+			lv.VectorVelocity = toTarget.Unit * CONFIG.ANKLE_PULL_SPEED
+			ao.CFrame = wallCFrame(w.lastDir, w.normal)
+			return
+		end
+	end
+
+	-- phase 2: walking on the wall
+	if now >= w.endTime then
+		endWall(w, "time")
+		return
+	end
+
+	local foot = w.foot
+	local n = w.normal
+
+	-- camera-relative walking direction on the wall plane
+	local cam = camera.CFrame
+	local fwd = planeProject(cam.LookVector, n)
+	if fwd.Magnitude < 0.35 then
+		fwd = planeProject(cam.UpVector, n) -- looking straight into the wall: "forward" is up the wall
+	end
+	if fwd.Magnitude < 0.05 then fwd = planeProject(w.lastDir, n) end
+	if fwd.Magnitude < 0.05 then fwd = planeProject(Vector3.yAxis, n) end
+	if fwd.Magnitude < 0.05 then fwd = planeProject(Vector3.xAxis, n) end
+	fwd = fwd.Unit
+	local right = fwd:Cross(n)
+
+	local mv = getMoveVector()
+	local move = right * mv.X + fwd * (-mv.Z)
+	if move.Magnitude > 1 then move = move.Unit end
+	if move.Magnitude > 0.1 then
+		w.lastDir = move.Unit
+	end
+
+	-- a wall ahead (inside corner): switch to it. A floor ahead: you walked down, so stand up.
+	if move.Magnitude > 0.2 then
+		local f = workspace:Raycast(root.Position, move.Unit * (foot + 1.5), w.params)
+		if f and validWall(f) and math.abs(f.Normal:Dot(n)) < 0.85 then
+			if f.Normal.Y >= 0.7 then
+				endWall(w, "land", Vector3.zero)
+				return
+			end
+			w.normal = f.Normal
+			n = w.normal
+		end
+	end
+
+	-- the surface under your feet
+	local r = workspace:Raycast(root.Position, -n * (foot + 3.5), w.params)
+	if r and validWall(r) then
+		if r.Normal.Y >= 0.7 then
+			endWall(w, "land", Vector3.zero) -- flat floor / ledge top
+			return
+		end
+		w.normal = w.normal:Lerp(r.Normal, 0.6).Unit
+		n = w.normal
+		w.lost = 0
+	else
+		r = nil
+		w.lost += dt
+		if w.lost > 0.15 then
+			-- ran off the edge: walking up a wall vaults you onto the ledge
+			local v
+			if w.lastDir.Y > 0.3 then
+				v = -n * 14 + Vector3.new(0, 24, 0)
+			else
+				v = w.lastDir * 22
+			end
+			endWall(w, "edge", v)
+			return
+		end
+	end
+
+	-- keep the feet a fixed distance from the wall
+	local stick
+	if r then
+		local desired = r.Position + n * (foot + 0.15)
+		stick = n * math.clamp((desired - root.Position):Dot(n) * 12, -25, 25)
+	else
+		stick = -n * 6
+	end
+
+	local speed = CONFIG.ANKLE_WALL_SPEED * (current and CONFIG.ANKLE_SANDE_BOOST or 1)
+	lv.VectorVelocity = move * speed + stick
+	ao.CFrame = wallCFrame(w.lastDir, n)
+end
+
+-- hit = raycast result of the wall. manual = true -> pulled there first, false -> automatic grip
+local function startWall(manual, hit, params)
+	if wall or psycho or burst then return end
+
+	local char = player.Character
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (humanoid and root) or humanoid.Health <= 0 then return end
+
+	local now = os.clock()
+	local n = hit.Normal
+	local foot = ankleFootOffset(char, root)
+
+	-- start facing up the wall (or along your heading on a slanted/flat one)
+	local startDir = planeProject(Vector3.yAxis, n)
+	if startDir.Magnitude < 0.2 then
+		local cl = root.CFrame.LookVector
+		startDir = planeProject(Vector3.new(cl.X, 0, cl.Z), n)
+	end
+	if startDir.Magnitude < 0.05 then startDir = planeProject(Vector3.xAxis, n) end
+
+	local w = {
+		char = char,
+		humanoid = humanoid,
+		root = root,
+		params = params,
+		normal = n,
+		foot = foot,
+		manual = manual,
+		lastDir = startDir.Unit,
+		lost = 0,
+		autoRotate = humanoid.AutoRotate,
+		objects = {},
+	}
+	if manual then
+		w.phase = "pull"
+		w.target = hit.Position + n * (foot + 0.15)
+		w.deadline = now + hit.Distance / CONFIG.ANKLE_PULL_SPEED + 0.5
+		w.endTime = math.huge
+		w.total = getWallTime(true)
+	else
+		w.phase = "walk"
+		w.total = getWallTime(false)
+		w.endTime = now + w.total
+	end
+	wall = w
+
+	-- hand the body over to the constraints
+	humanoid.PlatformStand = true
+	humanoid.AutoRotate = false
+
+	local att = Instance.new("Attachment")
+	att.Name = "AnkleAttach"
+	att.Parent = root
+
+	local lv = Instance.new("LinearVelocity")
+	lv.Name = "AnkleVelocity"
+	lv.Attachment0 = att
+	lv.RelativeTo = Enum.ActuatorRelativeTo.World
+	lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	lv.MaxForce = 1e7
+	lv.VectorVelocity = Vector3.zero
+	lv.Parent = root
+
+	local ao = Instance.new("AlignOrientation")
+	ao.Name = "AnkleAlign"
+	ao.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	ao.Attachment0 = att
+	ao.RigidityEnabled = false
+	ao.MaxTorque = 1e7
+	ao.Responsiveness = 35
+	ao.CFrame = wallCFrame(w.lastDir, n)
+	ao.Parent = root
+
+	w.lv, w.ao = lv, ao
+	table.insert(w.objects, att)
+	table.insert(w.objects, lv)
+	table.insert(w.objects, ao)
+
+	wallPulse(hit.Position + n * 0.5, 0.6)
+	shake(humanoid, 0.6, 0.2)
+	flashTitle(manual and "WALL PULL" or "WALL GRIP", ANKLE_COLOR)
+	if skeleton then skeleton.flash = 1 end
+
+	w.conn = RunService.Heartbeat:Connect(function(dt)
+		wallStep(w, dt)
+	end)
+end
+
+-- the button / key
+local function activateAnkles()
+	if psycho or burst then return end
+
+	-- pressing again while wall walking lets go (with a little push away from the wall)
+	if wall then
+		local w = wall
+		endWall(w, "manual", w.normal * 12)
+		return
+	end
+
+	if not ankleInstalled then
+		flashTitle("NO ANKLE IMPLANT", COLORS[2])
+		return
+	end
+
+	local char = player.Character
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (humanoid and root) or humanoid.Health <= 0 then return end
+
+	local now = os.clock()
+	local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+
+	if grounded then
+		-- big launch jump
+		if now < ankleJumpEnd then return end
+		ankleJumpEnd = now + CONFIG.ANKLE_JUMP_COOLDOWN
+		autoGripReady = true
+
+		local power = getAnkleJump()
+		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		task.spawn(function()
+			-- the Jumping state sets its own velocity first, so override it one step later
+			RunService.Heartbeat:Wait()
+			if root.Parent and humanoid.Health > 0 and not wall then
+				local v = root.AssemblyLinearVelocity
+				root.AssemblyLinearVelocity = Vector3.new(v.X, power, v.Z)
+			end
+		end)
+
+		shockwave(feetPosOf(humanoid, root), PALETTES[1], 0.45)
+		shake(humanoid, 0.8, 0.25)
+		if skeleton then skeleton.flash = 1 end
+	else
+		-- pull to the nearest wall
+		if now < ankleCooldownEnd then return end
+		local params = makeWallParams(char)
+		local hit = findNearestWall(root, params, CONFIG.ANKLE_PULL_RANGE)
+		if not hit then
+			flashTitle("NO SURFACE", COLORS[2])
+			return
+		end
+		startWall(true, hit, params)
+	end
+end
+
+-- INCREASED GRIP: brushing a wall mid-air (moving toward it) grips it without pressing anything
+local autoAirTime = 0
+local autoParams, autoParamsChar
+RunService.Heartbeat:Connect(function(dt)
+	if not ankleInstalled or not CONFIG.ANKLE_AUTO_GRIP then return end
+	if wall or psycho or burst then return end
+
+	local char = player.Character
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (humanoid and root) or humanoid.Health <= 0 then return end
+
+	if humanoid.FloorMaterial ~= Enum.Material.Air then
+		autoGripReady = true
+		autoAirTime = 0
+		return
+	end
+
+	autoAirTime += dt
+	if not autoGripReady or autoAirTime < 0.15 then return end
+	if os.clock() < ankleCooldownEnd then return end
+
+	local dir = humanoid.MoveDirection
+	if dir.Magnitude < 0.1 then
+		local v = root.AssemblyLinearVelocity
+		dir = Vector3.new(v.X, 0, v.Z)
+		if dir.Magnitude < 8 then return end
+	end
+	dir = Vector3.new(dir.X, 0, dir.Z)
+	if dir.Magnitude < 0.05 then return end
+	dir = dir.Unit
+
+	if autoParamsChar ~= char then
+		autoParams = makeWallParams(char)
+		autoParamsChar = char
+	end
+	local r = workspace:Raycast(root.Position, dir * CONFIG.ANKLE_AUTO_REACH, autoParams)
+	if r and math.abs(r.Normal.Y) < 0.55 and r.Normal:Dot(-dir) > 0.45 and validWall(r) then
+		startWall(false, r, autoParams)
+	end
+end)
+
+----------------------------------------------------------------
+-- SESSION
+----------------------------------------------------------------
+-- toPsychosis = true when the meter hit zero: skips the normal "power down"
+-- effects, because the cyberpsychosis episode takes over the screen.
+local function stopSession(toPsychosis)
+	local s = current
+	if not s then return end
+	current = nil
+
+	for _, c in ipairs(s.conns) do c:Disconnect() end
+	for _, o in ipairs(s.objects) do
+		if o.Parent then o:Destroy() end
+	end
+
+	local hum = s.humanoid
+	if hum and hum.Parent then
+		-- baseSpeed always tracks the game's latest speed (crouch, sprint, etc.)
+		hum.WalkSpeed = s.baseSpeed
+		if hum.UseJumpPower then
+			hum.JumpPower = s.baseJump
+		else
+			hum.JumpHeight = s.baseJump
+		end
+		setAnimSpeed(hum, 1)
+		if not toPsychosis then
+			shake(hum, 0.7, 0.5)
+		end
+	end
+
+	restoreWorld()
+	if toPsychosis then return end
+
+	blur.Size = 16
+	setEffects(false, s.baseFov, 0.7)
+	flashTitle("OFFLINE", COLORS[2])
+	cooldownTotal = getCooldown()
+	cooldownEnd = os.clock() + cooldownTotal
+
+	-- reward for using it
+	if os.clock() - s.startTime >= CONFIG.POINTS_MIN_TIME then
+		awardPoints(CONFIG.POINTS_PER_USE, "SANDEVISTAN")
+	end
+end
+
+local TRAIL_PARTS = {
+	"Head", "LeftHand", "RightHand", "LeftFoot", "RightFoot",
+	"Left Arm", "Right Arm", "Left Leg", "Right Leg",
+}
+
+local function activate()
+	if psycho then return end
+
+	-- pressing again while active cancels early (saves Humanity)
+	if current then
+		stopSession()
+		return
+	end
+
+	if os.clock() < cooldownEnd then return end
+
+	if meter < CONFIG.METER_MIN_TO_ACTIVATE then
+		flashTitle("LOW HUMANITY", COLORS[2])
+		return
+	end
+
+	local char = player.Character
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (humanoid and root) or humanoid.Health <= 0 then return end
+
+	local imp = getImplant()
+	local speed, jump, drainMult = getStats(implantIndex)
+	local palette = PALETTES[paletteIndex]
+	paletteIndex = paletteIndex % #PALETTES + 1
+
+	meter = math.max(0, meter - CONFIG.METER_ACTIVATION_COST * drainMult)
+
+	local s = {
+		char = char,
+		humanoid = humanoid,
+		root = root,
+		palette = palette,
+		imp = imp,
+		speed = speed,
+		jump = jump,
+		drainMult = drainMult,
+		conns = {},
+		objects = {},
+		startTime = os.clock(),
+		endTime = os.clock() + CONFIG.DURATION,
+		baseSpeed = humanoid.WalkSpeed,
+		baseJump = humanoid.UseJumpPower and humanoid.JumpPower or humanoid.JumpHeight,
+		baseFov = camera.FieldOfView,
+		airStart = nil,
+		warned = false,
+		lastSpeed = 0,
+	}
+	current = s
+
+	-- speed / jump (from the equipped implant)
+	humanoid.WalkSpeed = s.baseSpeed * speed
+	s.lastSpeed = humanoid.WalkSpeed -- remember what we set, so we can spot outside changes
+	if humanoid.UseJumpPower then
+		humanoid.JumpPower = s.baseJump * jump
+	else
+		humanoid.JumpHeight = s.baseJump * jump
+	end
+
+	-- low gravity: upward force on YOUR character only (the world is untouched)
+	local gAttach = Instance.new("Attachment")
+	gAttach.Name = "SandevistanGravAttach"
+	gAttach.Parent = root
+	local antiGrav = Instance.new("VectorForce")
+	antiGrav.Name = "SandevistanAntiGravity"
+	antiGrav.Attachment0 = gAttach
+	antiGrav.RelativeTo = Enum.ActuatorRelativeTo.World
+	antiGrav.ApplyAtCenterOfMass = true
+	antiGrav.Force = Vector3.zero
+	antiGrav.Parent = root
+	table.insert(s.objects, gAttach)
+	table.insert(s.objects, antiGrav)
+
+	-- body glow
+	local highlight = Instance.new("Highlight")
+	highlight.Adornee = char
+	highlight.FillColor = palette.stops[1].c
+	highlight.FillTransparency = 0.65
+	highlight.OutlineColor = palette.stops[#palette.stops].c
+	highlight.OutlineTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+	highlight.Parent = char
+	table.insert(s.objects, highlight)
+
+	-- limb trails (same gradient as the afterimages)
+	for _, name in ipairs(TRAIL_PARTS) do
+		local p = char:FindFirstChild(name)
+		if p and p:IsA("BasePart") then
+			local a0 = Instance.new("Attachment")
+			a0.Position = Vector3.new(0, 0.35, 0)
+			a0.Parent = p
+			local a1 = Instance.new("Attachment")
+			a1.Position = Vector3.new(0, -0.35, 0)
+			a1.Parent = p
+
+			local trail = Instance.new("Trail")
+			trail.Attachment0 = a0
+			trail.Attachment1 = a1
+			trail.Lifetime = 0.45
+			trail.MinLength = 0.05
+			trail.LightEmission = 1
+			trail.FaceCamera = true
+			trail.Color = toColorSequence(palette.stops)
+			trail.Transparency = NumberSequence.new(0.2, 1)
+			trail.WidthScale = NumberSequence.new(1, 0)
+			trail.Parent = p
+
+			table.insert(s.objects, a0)
+			table.insert(s.objects, a1)
+			table.insert(s.objects, trail)
+		end
+	end
+
+	-- activation burst
+	local function feetPos()
+		return feetPosOf(humanoid, root)
+	end
+	shockwave(feetPos(), palette, 1)
+	spawnGhost(char, palette)
+	shake(humanoid, 1.2, 0.5)
+	flashTitle("SANDEVISTAN", palette.stops[1].c)
+	setEffects(true, s.baseFov, 0.4)
+
+	-- landing impact (only after real air time)
+	table.insert(s.conns, humanoid.StateChanged:Connect(function(_, new)
+		if new == Enum.HumanoidStateType.Jumping or new == Enum.HumanoidStateType.Freefall then
+			s.airStart = s.airStart or os.clock()
+		elseif new == Enum.HumanoidStateType.Landed then
+			if s.airStart and os.clock() - s.airStart > 0.6 then
+				shockwave(feetPos(), palette, 0.5)
+				shake(humanoid, 0.5, 0.25)
+			end
+			s.airStart = nil
+		end
+	end))
+
+	-- main loop
+	local lastPos = root.Position
+	local nextScan = 0
+	table.insert(s.conns, RunService.RenderStepped:Connect(function(dt)
+		local now = os.clock()
+
+		if now >= s.endTime or humanoid.Health <= 0 or not char.Parent or not root.Parent then
+			stopSession()
+			return
+		end
+
+		-- HUMANITY drain: gets faster the longer you stay in
+		local drain = (CONFIG.METER_DRAIN_BASE + CONFIG.METER_DRAIN_RAMP * (now - s.startTime)) * s.drainMult
+		meter = math.max(0, meter - drain * dt)
+
+		if meter <= 0 then
+			local baseFov = s.baseFov
+			stopSession(true)
+			startPsychosis(baseFov)
+			return
+		end
+
+		if meter <= getMeterMax() * CONFIG.METER_WARNING_FRAC and not s.warned then
+			s.warned = true
+			flashTitle("HUMANITY CRITICAL", COLORS[2])
+		end
+
+		-- keep the boost in sync with the game's speed changes (crouch, sprint, etc.)
+		if math.abs(humanoid.WalkSpeed - s.lastSpeed) > 0.01 then
+			-- something else changed WalkSpeed, so treat that as the new base speed
+			s.baseSpeed = humanoid.WalkSpeed
+		end
+		humanoid.WalkSpeed = s.baseSpeed * s.speed
+		s.lastSpeed = humanoid.WalkSpeed
+
+		setAnimSpeed(humanoid, CONFIG.ANIM_SPEED)
+
+		-- cancel part of gravity on the character
+		antiGrav.Force = Vector3.new(0, root.AssemblyMass * workspace.Gravity * (1 - s.imp.gravity), 0)
+
+		local a = (math.sin(now * CONFIG.COLOR_CYCLE_SPEED) + 1) / 2
+		highlight.FillColor = sampleGradient(palette.stops, a)
+		highlight.OutlineColor = sampleGradient(palette.stops, 1 - a)
+
+		if (root.Position - lastPos).Magnitude >= CONFIG.GHOST_SPACING then
+			spawnGhost(char, palette)
+			lastPos = root.Position
+		end
+
+		if now >= nextScan then
+			scanWorld()
+			nextScan = now + 0.5
+		end
+	end))
+end
+
+----------------------------------------------------------------
+-- HUD UPDATE (buttons + humanity meter + skeleton)
+----------------------------------------------------------------
+RunService.RenderStepped:Connect(function(dt)
+	local now = os.clock()
+
+	updateSkeleton(now, dt)
+
+	-- implants button looks locked while Sandevistan is on
+	local locked = (current ~= nil) or (psycho ~= nil)
+	implantStroke.Transparency = locked and 0.7 or 0
+	implantSub.TextTransparency = locked and 0.5 or 0
+	updateImplantFooter(locked)
+	implantStroke.Color = getImplant().color
+
+	-- meter regen only while fully off
+	if not current and not psycho then
+		meter = math.min(getMeterMax(), meter + getRegen() * dt)
+	end
+
+	-- meter visuals
+	meterShown += (meter - meterShown) * math.min(1, dt * 10)
+	local pct = math.clamp(meterShown / getMeterMax(), 0, 1)
+	local mc = sampleGradient(METER_STOPS, pct)
+	meterFill.Size = UDim2.fromScale(1, pct)
+	meterFill.BackgroundColor3 = mc
+	meterValue.Text = string.format("%d / %d", math.floor(meterShown + 0.5), getMeterMax())
+	meterValue.TextColor3 = mc
+	meterTitle.TextColor3 = mc
+
+	if psycho then
+		local flick = math.random() < 0.5
+		meterStroke.Color = flick and COLORS[2] or Color3.new(1, 1, 1)
+		meterStroke.Thickness = 3
+		meterValue.Text = corrupt("ERR", 0.4)
+		meterTitle.Text = corrupt("HUMANITY", 0.35)
+		meterRoot.Position = UDim2.new(0, 22 + math.random(-4, 4), 0.5, math.random(-3, 3))
+	else
+		meterTitle.Text = "HUMANITY"
+		meterRoot.Position = UDim2.new(0, 22, 0.5, 0)
+		if meter <= getMeterMax() * CONFIG.METER_WARNING_FRAC then
+			local pulse = (math.sin(now * 14) + 1) / 2
+			meterStroke.Color = mc:Lerp(Color3.new(1, 1, 1), pulse)
+			meterStroke.Thickness = 2 + pulse * 2
+		else
+			meterStroke.Color = mc
+			meterStroke.Thickness = 2
+		end
+	end
+
+	-- Sandevistan button
+	if psycho then
+		fill.Size = UDim2.fromScale(1, 1)
+		fill.BackgroundColor3 = (math.random() < 0.5) and COLORS[2] or Color3.fromRGB(60, 10, 25)
+		stroke.Color = randomNeon()
+		stroke.Thickness = 3
+		label.Text = corrupt("ERR", 0.5)
+	elseif current then
+		local remaining = math.max(0, current.endTime - now)
+		local a = (math.sin(now * CONFIG.COLOR_CYCLE_SPEED) + 1) / 2
+		fill.Size = UDim2.fromScale(1, remaining / CONFIG.DURATION)
+		fill.BackgroundColor3 = sampleGradient(current.palette.stops, a)
+		stroke.Color = sampleGradient(current.palette.stops, 1 - a)
+		stroke.Thickness = 3
+		label.Text = string.format("%.1f", remaining)
+	elseif now < cooldownEnd then
+		local remaining = cooldownEnd - now
+		local total = cooldownTotal
+		fill.Size = UDim2.fromScale(1, math.clamp(1 - remaining / total, 0, 1))
+		fill.BackgroundColor3 = Color3.fromRGB(90, 90, 115)
+		stroke.Color = Color3.fromRGB(90, 90, 115)
+		stroke.Thickness = 3
+		label.Text = tostring(math.ceil(remaining))
+	else
+		fill.Size = UDim2.fromScale(1, 1)
+		fill.BackgroundColor3 = getImplant().color
+		stroke.Color = getImplant().color
+		stroke.Thickness = 3 + math.sin(now * 6)
+		label.Text = "⚡"
+	end
+
+	-- Ghost Burst button
+	if burst then
+		local a = (math.sin(now * CONFIG.COLOR_CYCLE_SPEED) + 1) / 2
+		local c = sampleGradient(PALETTES[1].stops, a)
+		burstFill.Size = UDim2.fromScale(1, 1)
+		burstFill.BackgroundColor3 = c
+		burstStroke.Color = c
+		burstLabel.Text = ">>"
+	elseif psycho then
+		burstFill.Size = UDim2.fromScale(1, 1)
+		burstFill.BackgroundColor3 = Color3.fromRGB(60, 10, 25)
+		burstStroke.Color = COLORS[2]
+		burstLabel.Text = "X"
+	elseif now < burstCooldownEnd then
+		local remaining = burstCooldownEnd - now
+		burstFill.Size = UDim2.fromScale(1, math.clamp(1 - remaining / burstCooldownTotal, 0, 1))
+		burstFill.BackgroundColor3 = Color3.fromRGB(90, 90, 115)
+		burstStroke.Color = Color3.fromRGB(90, 90, 115)
+		burstLabel.Text = tostring(math.ceil(remaining))
+	else
+		burstFill.Size = UDim2.fromScale(1, 1)
+		burstFill.BackgroundColor3 = getImplant().color
+		burstStroke.Color = getImplant().color
+		burstLabel.Text = IS_TOUCH and ">>" or "E"
+	end
+
+	-- Fortified Ankles button
+	local idleText = IS_TOUCH and "^^" or "F"
+	if not ankleInstalled then
+		ankleFill.Size = UDim2.fromScale(1, 1)
+		ankleFill.BackgroundColor3 = Color3.fromRGB(40, 42, 58)
+		ankleStroke.Color = Color3.fromRGB(70, 74, 96)
+		ankleLabel.Text = idleText
+	elseif psycho then
+		ankleFill.Size = UDim2.fromScale(1, 1)
+		ankleFill.BackgroundColor3 = Color3.fromRGB(60, 10, 25)
+		ankleStroke.Color = COLORS[2]
+		ankleLabel.Text = "X"
+	elseif wall then
+		if wall.phase == "pull" then
+			ankleFill.Size = UDim2.fromScale(1, 1)
+			ankleFill.BackgroundColor3 = Color3.new(1, 1, 1)
+			ankleStroke.Color = ANKLE_COLOR
+			ankleLabel.Text = ">>"
+		else
+			local remaining = math.max(0, wall.endTime - now)
+			local a = (math.sin(now * CONFIG.COLOR_CYCLE_SPEED) + 1) / 2
+			ankleFill.Size = UDim2.fromScale(1, math.clamp(remaining / wall.total, 0, 1))
+			ankleFill.BackgroundColor3 = ANKLE_COLOR:Lerp(Color3.new(1, 1, 1), a * 0.4)
+			ankleStroke.Color = ANKLE_COLOR
+			ankleLabel.Text = string.format("%.1f", remaining)
+		end
+	else
+		local ch = player.Character
+		local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+		local grounded = hum ~= nil and hum.FloorMaterial ~= Enum.Material.Air
+		local endT, total
+		if grounded then
+			endT, total = ankleJumpEnd, CONFIG.ANKLE_JUMP_COOLDOWN
+		else
+			endT, total = ankleCooldownEnd, ankleCooldownTotal
+		end
+		if now < endT then
+			local remaining = endT - now
+			ankleFill.Size = UDim2.fromScale(1, math.clamp(1 - remaining / math.max(0.1, total), 0, 1))
+			ankleFill.BackgroundColor3 = Color3.fromRGB(90, 90, 115)
+			ankleStroke.Color = Color3.fromRGB(90, 90, 115)
+			ankleLabel.Text = tostring(math.ceil(remaining))
+		else
+			ankleFill.Size = UDim2.fromScale(1, 1)
+			ankleFill.BackgroundColor3 = ANKLE_COLOR
+			ankleStroke.Color = ANKLE_COLOR
+			ankleLabel.Text = idleText
+		end
+	end
+end)
+
+----------------------------------------------------------------
+-- INPUT
+----------------------------------------------------------------
+button.Activated:Connect(activate)
+burstButton.Activated:Connect(startBurst)
+ankleButton.Activated:Connect(activateAnkles)
+
+UIS.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.ButtonY then
+		activate()
+	elseif input.KeyCode == CONFIG.BURST_KEY or input.KeyCode == Enum.KeyCode.ButtonX then
+		startBurst()
+	elseif input.KeyCode == CONFIG.ANKLE_KEY or input.KeyCode == Enum.KeyCode.ButtonB then
+		activateAnkles()
+	elseif input.KeyCode == CONFIG.IMPLANT_KEY then
+		setPanelOpen(not panel.Visible)
+	end
+end)
+
+-- jumping while wall walking pushes you off the wall
+UIS.JumpRequest:Connect(function()
+	local w = wall
+	if w then
+		local v = w.normal * CONFIG.ANKLE_WALL_JUMP_OUT + Vector3.new(0, CONFIG.ANKLE_WALL_JUMP_UP, 0)
+		endWall(w, "jump", v)
+	end
+end)
+
+player.CharacterAdded:Connect(function(char)
+	stopSession()
+	cancelBurst(true)
+	cancelWall()
+	stopPsychosis(true) -- also re-enables controls
+	meter = getMeterMax()
+	cooldownEnd = 0
+	burstCooldownEnd = 0
+	ankleCooldownEnd = 0
+	ankleJumpEnd = 0
+	autoGripReady = true
+	task.spawn(buildSkeleton, char)
+end)
+
+if player.Character then
+	task.spawn(buildSkeleton, player.Character)
+end
